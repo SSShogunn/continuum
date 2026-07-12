@@ -1,0 +1,11 @@
+services:
+  continuum-core:
+    build: .
+    ports:
+      - "8788:8788"
+    volumes:
+      - .:/app
+      - /app/.venv
+    env_file:
+      - .env
+    command: ["uv", "run", "watchfiles", "python app/server.py", "/app"]
