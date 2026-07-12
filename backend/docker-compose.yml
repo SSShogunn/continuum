@@ -1,0 +1,11 @@
+services:
+  continuum-backend:
+    build: .
+    ports:
+      - "8789:8789"
+    volumes:
+      - .:/app
+      - /app/.venv
+    env_file:
+      - .env
+    command: ["sh", "-c", "uv run prisma generate && uv run uvicorn main:app --host 0.0.0.0 --port 8789 --reload"]
