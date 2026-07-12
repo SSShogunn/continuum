@@ -8,11 +8,14 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, Form, HTTPException
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
+from sqlalchemy import update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.db import db
+from app.db import get_session
 from app.deps import get_current_user
 from app.jwt import mint_mcp_token
+from app.models import McpToken, OAuthClient, OAuthCode
 
 router = APIRouter(tags=["oauth"])
 
@@ -39,15 +42,17 @@ class RegisterRequest(BaseModel):
 
 
 @router.post("/oauth/register", status_code=201)
-async def register_client(body: RegisterRequest):
+async def register_client(
+    body: RegisterRequest, session: AsyncSession = Depends(get_session)
+):
     client_secret = secrets.token_urlsafe(32)
-    client = await db.oauthclient.create(
-        data={
-            "clientSecret": client_secret,
-            "redirectUris": body.redirect_uris,
-            "name": body.client_name,
-        }
+    client = OAuthClient(
+        clientSecret=client_secret,
+        redirectUris=body.redirect_uris,
+        name=body.client_name,
     )
+    session.add(client)
+    await session.commit()
     return JSONResponse(
         status_code=201,
         content={
@@ -69,8 +74,9 @@ async def authorize(
     state: str | None = None,
     code_challenge: str | None = None,
     code_challenge_method: str | None = None,
+    session: AsyncSession = Depends(get_session),
 ):
-    client = await db.oauthclient.find_unique(where={"id": client_id})
+    client = await session.get(OAuthClient, client_id)
     if not client:
         raise HTTPException(400, "Unknown client_id")
     if redirect_uri not in client.redirectUris:
@@ -99,23 +105,28 @@ class CompleteRequest(BaseModel):
 
 
 @router.post("/api/oauth/complete")
-async def authorize_complete(body: CompleteRequest, user: dict = Depends(get_current_user)):
-    client = await db.oauthclient.find_unique(where={"id": body.client_id})
+async def authorize_complete(
+    body: CompleteRequest,
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    client = await session.get(OAuthClient, body.client_id)
     if not client or body.redirect_uri not in client.redirectUris:
         raise HTTPException(400, "Invalid client or redirect_uri")
 
     code = secrets.token_urlsafe(32)
-    await db.oauthcode.create(
-        data={
-            "code": code,
-            "clerkUserId": user["sub"],
-            "clientId": body.client_id,
-            "redirectUri": body.redirect_uri,
-            "codeChallenge": body.code_challenge,
-            "codeChallengeMethod": body.code_challenge_method,
-            "expiresAt": datetime.now(timezone.utc) + timedelta(minutes=10),
-        }
+    session.add(
+        OAuthCode(
+            code=code,
+            clerkUserId=user["sub"],
+            clientId=body.client_id,
+            redirectUri=body.redirect_uri,
+            codeChallenge=body.code_challenge,
+            codeChallengeMethod=body.code_challenge_method,
+            expiresAt=datetime.now(timezone.utc) + timedelta(minutes=10),
+        )
     )
+    await session.commit()
 
     params: dict[str, str] = {"code": code}
     if body.state:
@@ -130,11 +141,12 @@ async def token_exchange(
     redirect_uri: str = Form(),
     client_id: str = Form(),
     code_verifier: str | None = Form(default=None),
+    session: AsyncSession = Depends(get_session),
 ):
     if grant_type != "authorization_code":
         raise HTTPException(400, detail={"error": "unsupported_grant_type"})
 
-    oauth_code = await db.oauthcode.find_unique(where={"code": code})
+    oauth_code = await session.get(OAuthCode, code)
     if not oauth_code:
         raise HTTPException(400, detail={"error": "invalid_grant", "error_description": "Code not found"})
     if oauth_code.clientId != client_id:
@@ -146,7 +158,8 @@ async def token_exchange(
     if expires.tzinfo is None:
         expires = expires.replace(tzinfo=timezone.utc)
     if expires < datetime.now(timezone.utc):
-        await db.oauthcode.delete(where={"code": code})
+        await session.delete(oauth_code)
+        await session.commit()
         raise HTTPException(400, detail={"error": "invalid_grant", "error_description": "Code expired"})
 
     if oauth_code.codeChallenge:
@@ -158,23 +171,20 @@ async def token_exchange(
             raise HTTPException(400, detail={"error": "invalid_grant", "error_description": "PKCE verification failed"})
 
     # One-time use
-    await db.oauthcode.delete(where={"code": code})
+    clerk_user_id = oauth_code.clerkUserId
+    await session.delete(oauth_code)
 
     now = datetime.now(timezone.utc)
-    await db.mcptoken.update_many(
-        where={"clerkUserId": oauth_code.clerkUserId, "revokedAt": None},
-        data={"revokedAt": now},
+    await session.execute(
+        update(McpToken)
+        .where(McpToken.clerkUserId == clerk_user_id, McpToken.revokedAt.is_(None))
+        .values(revokedAt=now)
     )
 
     jti = str(uuid.uuid4())
-    access_token = mint_mcp_token(oauth_code.clerkUserId, jti)
-    await db.mcptoken.create(
-        data={
-            "clerkUserId": oauth_code.clerkUserId,
-            "label": "oauth",
-            "jti": jti,
-        }
-    )
+    access_token = mint_mcp_token(clerk_user_id, jti)
+    session.add(McpToken(clerkUserId=clerk_user_id, label="oauth", jti=jti))
+    await session.commit()
 
     return JSONResponse(
         content={"access_token": access_token, "token_type": "bearer"},
