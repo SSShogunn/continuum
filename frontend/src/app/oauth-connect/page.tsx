@@ -2,9 +2,21 @@
 
 import { useUser } from "@clerk/nextjs";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 
 export default function OAuthConnectPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center text-gray-500">Loading…</div>
+      }
+    >
+      <OAuthConnectContent />
+    </Suspense>
+  );
+}
+
+function OAuthConnectContent() {
   const { isSignedIn, isLoaded, user } = useUser();
   const router = useRouter();
   const params = useSearchParams();

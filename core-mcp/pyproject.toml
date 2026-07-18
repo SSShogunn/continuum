@@ -2,17 +2,23 @@
 name = "continuum-core"
 version = "0.1.0"
 description = "MCP server for browser-grade web access — fetch pages as markdown, screenshot, and download images via headless Playwright"
-requires-python = ">=3.14"
+requires-python = ">=3.13,<3.14"
 keywords = ["mcp", "playwright", "browser", "web-scraping", "screenshot", "fastmcp", "llm-tools"]
 
 dependencies = [
+    "alembic>=1.13.0",
     "asyncpg>=0.30.0",
     "fastembed>=0.8.0",
     "fastmcp>=3.4.2",
     "html2text>=2025.4.15",
     "httpx>=0.28.1",
+    "instructor>=1.15.4",
+    "litellm>=1.92.0",
     "playwright>=1.60.0",
     "python-dotenv>=1.0.0",
+    "rapidfuzz>=3.14.5",
+    "sqlalchemy[asyncio]>=2.0.0",
+    "tenacity>=9.1.4",
     "trafilatura>=2.1.0",
 ]
 

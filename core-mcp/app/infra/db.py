@@ -3,7 +3,7 @@ import json
 import logging
 from datetime import datetime, timezone
 
-import pg
+from . import pg
 
 logger = logging.getLogger("continuum.db")
 

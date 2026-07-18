@@ -4,14 +4,13 @@ import os
 import re
 import signal
 import time
-import auth
-import browser_pool
-import db
-import memory
-import pg
+from . import auth
+from .infra import browser_pool, db, pg
+from .memory import facts, memory
 import html2text
 import httpx
 import trafilatura
+from rapidfuzz import fuzz
 from dotenv import load_dotenv
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -37,6 +36,9 @@ DEFAULT_USER_AGENT = (
 )
 
 HTTP2_ERROR_MARKERS = ("ERR_HTTP2_PROTOCOL_ERROR", "ERR_HTTP2", "ERR_CONNECTION_RESET")
+
+BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
+SERPAPI_SEARCH_URL = "https://serpapi.com/search"
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
@@ -361,6 +363,169 @@ async def fetch_image(image_url: str, referer: str | None = None) -> Image:
     return Image(data=response.content, format=fmt)
 
 
+async def _brave_search(query: str, count: int) -> list[dict]:
+    api_key = os.environ.get("CONTINUUM_BRAVE_API_KEY", "")
+    if not api_key:
+        raise ToolError("CONTINUUM_BRAVE_API_KEY is not configured.")
+
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            BRAVE_SEARCH_URL,
+            params={"q": query, "count": count},
+            headers={"Accept": "application/json", "X-Subscription-Token": api_key},
+            timeout=15.0,
+        )
+
+    if response.status_code == 429:
+        raise httpx.HTTPStatusError(
+            "Brave Search quota exceeded", request=response.request, response=response
+        )
+    response.raise_for_status()
+
+    results = response.json().get("web", {}).get("results", [])
+    return [
+        {
+            "title": r.get("title", ""),
+            "url": r.get("url", ""),
+            "snippet": r.get("description", ""),
+            "published": r.get("age") or r.get("page_age") or "",
+        }
+        for r in results[:count]
+    ]
+
+
+async def _serpapi_search(query: str, count: int) -> list[dict]:
+    api_key = os.environ.get("CONTINUUM_SERPAPI_KEY", "")
+    if not api_key:
+        raise ToolError("Brave Search quota exceeded and CONTINUUM_SERPAPI_KEY fallback is not configured.")
+
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            SERPAPI_SEARCH_URL,
+            params={"q": query, "num": count, "api_key": api_key, "engine": "google"},
+            timeout=15.0,
+        )
+    response.raise_for_status()
+
+    results = response.json().get("organic_results", [])
+    return [
+        {
+            "title": r.get("title", ""),
+            "url": r.get("link", ""),
+            "snippet": r.get("snippet", ""),
+            "published": r.get("date", ""),
+        }
+        for r in results[:count]
+    ]
+
+
+@mcp.tool
+async def search_web(query: str, count: int = 10) -> str:
+    """Search the web via Brave Search and return structured results (title, URL, snippet, published date). Falls back to SerpAPI if the Brave quota is exceeded."""
+    try:
+        results = await _brave_search(query, count)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code != 429:
+            raise ToolError(f"Brave Search request failed: {exc.response.status_code}")
+        logger.info("Brave Search quota exceeded, falling back to SerpAPI")
+        results = await _serpapi_search(query, count)
+
+    if not results:
+        return "No results found."
+
+    blocks = [
+        f"## {r['title']}\n{r['url']}\n{r['snippet']}" + (f"\n({r['published']})" if r["published"] else "")
+        for r in results
+    ]
+    return "\n\n---\n\n".join(blocks)
+
+
+async def _check_one_url(url: str) -> dict:
+    async with httpx.AsyncClient(follow_redirects=True, timeout=10.0) as client:
+        try:
+            response = await client.head(url, headers={"User-Agent": DEFAULT_USER_AGENT})
+            if response.status_code in (405, 501):
+                response = await client.get(url, headers={"User-Agent": DEFAULT_USER_AGENT})
+        except httpx.ConnectError as exc:
+            return {"url": url, "resolved": False, "error": f"connection failed: {exc}"}
+        except httpx.TimeoutException:
+            return {"url": url, "resolved": False, "error": "timed out"}
+        except httpx.HTTPError as exc:
+            return {"url": url, "resolved": False, "error": str(exc)}
+
+    redirect_chain = [str(r.url) for r in response.history]
+    return {
+        "url": url,
+        "resolved": True,
+        "status_code": response.status_code,
+        "final_url": str(response.url),
+        "redirected": str(response.url) != url,
+        "redirect_chain": redirect_chain,
+        "content_type": response.headers.get("content-type", ""),
+    }
+
+
+@mcp.tool
+async def check_url(url: str) -> str:
+    """Verify whether a URL actually resolves (catches dead links, typos, and hallucinated URLs). Reports status code, whether it redirected, the final URL, and content type."""
+    result = await _check_one_url(url)
+    if not result["resolved"]:
+        return f"UNRESOLVED: {url}\nError: {result['error']}"
+
+    lines = [f"Status: {result['status_code']}", f"Content-Type: {result['content_type'] or 'unknown'}"]
+    if result["redirected"]:
+        lines.append(f"Redirected to: {result['final_url']}")
+        if result["redirect_chain"]:
+            lines.append(f"Redirect chain: {' -> '.join(result['redirect_chain'] + [result['final_url']])}")
+    ok = 200 <= result["status_code"] < 400
+    return f"{'RESOLVED' if ok else 'ERROR RESPONSE'}: {url}\n" + "\n".join(lines)
+
+
+def _normalize_text(s: str) -> str:
+    return re.sub(r"\s+", " ", s).strip()
+
+
+@mcp.tool
+async def verify_quote(url: str, quote: str, context_chars: int = 200) -> str:
+    """Check whether a quoted string actually appears verbatim on a page — use this before presenting a quote/citation as fact to catch fabricated or misremembered quotes. Returns an exact match, or the closest matching passage with a similarity score if no exact match exists."""
+    try:
+        html, title = await _with_engine_fallback(
+            lambda engine: _goto_and_extract(url, None, 15000, engine)
+        )
+    except PlaywrightError as exc:
+        raise ToolError(f"Failed to load {url}: {_concise_error(exc)}")
+
+    page_text = trafilatura.extract(html, url=url, output_format="txt", favor_recall=True) or _to_markdown(html)
+    haystack = _normalize_text(page_text)
+    needle = _normalize_text(quote)
+
+    if not needle:
+        raise ToolError("quote is empty after normalization.")
+
+    idx = haystack.lower().find(needle.lower())
+    if idx != -1:
+        start = max(0, idx - context_chars)
+        end = min(len(haystack), idx + len(needle) + context_chars)
+        return (
+            f"VERIFIED: exact match found on \"{title}\" ({url})\n\n"
+            f"...{haystack[start:end]}..."
+        )
+
+    alignment = fuzz.partial_ratio_alignment(needle.lower(), haystack.lower())
+    if alignment is None or alignment.score == 0:
+        return f"NOT FOUND: no resemblance to this quote on \"{title}\" ({url})"
+
+    window_start = max(0, alignment.dest_start - context_chars)
+    window_end = min(len(haystack), alignment.dest_end + context_chars)
+    window = haystack[window_start:window_end]
+    score = alignment.score / 100
+
+    return (
+        f"NO EXACT MATCH (similarity={score:.2f}) on \"{title}\" ({url})\n\n"
+        f"Closest passage:\n...{window}..."
+    )
+
+
 @mcp.tool
 async def memory_save(name: str, type: str, description: str, content: str) -> str:
     """Save or update a persistent memory entry (e.g. facts about the user, their preferences, or ongoing project context) so it can be recalled later across sessions via memory_search. `name` is a unique slug — saving again with the same name overwrites the existing entry. `type` categorizes the entry (e.g. user, preference, project, reference)."""
@@ -381,6 +546,19 @@ async def memory_search(query: str, top_k: int = 5, type: str | None = None) -> 
         for r in results
     ]
     return "\n\n---\n\n".join(blocks)
+
+
+@mcp.tool
+async def memory_fact_search(query: str, top_k: int = 5) -> str:
+    """Semantically search atomic facts extracted from saved memories — more precise than memory_search for narrow questions, since each fact is a single claim rather than a full memory blob."""
+    owner = auth.current_owner() or ""
+    results = await facts.search(owner, query, top_k=top_k)
+    if not results:
+        return "No facts found."
+    return "\n".join(
+        f"- {r['content']} (from {r['source_name']}, score={r['score']:.3f})"
+        for r in results
+    )
 
 
 @mcp.tool

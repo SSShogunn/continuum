@@ -54,7 +54,7 @@ export default function DashboardPage() {
       }
       setNewToken(data.token);
       setTokens((prev) =>
-        [{ id: data.id, label: data.label, createdAt: data.createdAt, revokedAt: null, lastUsedAt: null }].concat(
+        ([{ id: data.id, label: data.label, createdAt: data.createdAt, revokedAt: null, lastUsedAt: null }] as TokenMeta[]).concat(
           prev.map((t) => ({ ...t, revokedAt: t.revokedAt ?? new Date().toISOString() }))
         )
       );
