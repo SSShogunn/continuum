@@ -17,3 +17,7 @@ def build_verifier() -> JWTVerifier | None:
 def current_owner() -> str | None:
     token = get_access_token()
     return token.client_id if token else None
+
+
+def scoped_owner(workspace: str = "default") -> str:
+    return f"{current_owner() or ''}:{workspace}"

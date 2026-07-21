@@ -3,41 +3,17 @@ import logging
 import os
 from datetime import datetime, timezone
 
-import instructor
-import litellm
-from instructor.core.exceptions import InstructorRetryException
 from pydantic import BaseModel
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from ..infra import pg
+from . import graph
 from .embeddings import embed
+from .llm import client, is_transient_failure
 
 logger = logging.getLogger("continuum.facts")
 
 DEDUP_THRESHOLD = 0.9
-
-_client = instructor.from_litellm(litellm.acompletion)
-
-_TRANSIENT_EXCEPTIONS = (
-    litellm.exceptions.RateLimitError,
-    litellm.exceptions.APIConnectionError,
-    litellm.exceptions.Timeout,
-)
-
-
-def _is_transient_failure(exc: BaseException) -> bool:
-    # instructor wraps the underlying cause in InstructorRetryException once its
-    # own retries are exhausted — the raw litellm exception types never reach this
-    # point directly, so we have to unwrap it. Where the underlying cause actually
-    # ends up differs by failure mode (confirmed by direct testing, not assumed):
-    # transport-level errors (e.g. connection failures) show up via Python's
-    # exception-chaining `__cause__`, with `failed_attempts` left empty, while
-    # validation failures populate `failed_attempts` instead. Check both.
-    if not isinstance(exc, InstructorRetryException):
-        return False
-    if isinstance(exc.__cause__, _TRANSIENT_EXCEPTIONS):
-        return True
-    return bool(exc.failed_attempts) and isinstance(exc.failed_attempts[-1].exception, _TRANSIENT_EXCEPTIONS)
 
 
 class ExtractedFacts(BaseModel):
@@ -65,7 +41,7 @@ def schedule_extract(owner: str, name: str, text: str) -> None:
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10),
-    retry=retry_if_exception(_is_transient_failure),
+    retry=retry_if_exception(is_transient_failure),
     reraise=True,
 )
 async def _extract_facts_llm(text: str) -> list[str]:
@@ -78,7 +54,7 @@ async def _extract_facts_llm(text: str) -> list[str]:
     # distinctive value); the outer tenacity retry above handles transient
     # transport failures with real exponential backoff, which instructor's
     # internal retry loop doesn't apply.
-    result = await _client.chat.completions.create(
+    result = await client.chat.completions.create(
         model=model,
         api_key=api_key,
         messages=[{"role": "user", "content": f"Extract atomic facts from this text:\n\n{text}"}],
@@ -95,6 +71,7 @@ async def extract(owner: str, name: str, text: str) -> None:
     now = datetime.now(timezone.utc)
 
     embedded = [(content, await embed(content)) for content in facts]
+    inserted: list[tuple[int, str]] = []
 
     async with pg.pool().acquire() as conn:
         async with conn.transaction():
@@ -118,15 +95,18 @@ async def extract(owner: str, name: str, text: str) -> None:
                 if nearest is not None and nearest["score"] >= DEDUP_THRESHOLD:
                     continue
 
-                await conn.execute(
+                fact_id = await conn.fetchval(
                     """
                     INSERT INTO fact (owner, source_name, content, embedding, valid_from, created_at)
                     VALUES ($1, $2, $3, $4, $5, $6)
+                    RETURNING id
                     """,
                     owner, name, content, embedding, now, now,
                 )
+                inserted.append((fact_id, content))
 
     logger.info("Extracted %d facts for %s/%s", len(facts), owner, name)
+    graph.schedule_extract(owner, inserted)
 
 
 async def search(owner: str, query: str, top_k: int = 5) -> list[dict]:

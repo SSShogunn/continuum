@@ -6,7 +6,7 @@ import signal
 import time
 from . import auth
 from .infra import browser_pool, db, pg
-from .memory import facts, memory
+from .memory import facts, graph, memory
 import html2text
 import httpx
 import trafilatura
@@ -527,17 +527,17 @@ async def verify_quote(url: str, quote: str, context_chars: int = 200) -> str:
 
 
 @mcp.tool
-async def memory_save(name: str, type: str, description: str, content: str) -> str:
-    """Save or update a persistent memory entry (e.g. facts about the user, their preferences, or ongoing project context) so it can be recalled later across sessions via memory_search. `name` is a unique slug — saving again with the same name overwrites the existing entry. `type` categorizes the entry (e.g. user, preference, project, reference)."""
-    owner = auth.current_owner() or ""
+async def memory_save(name: str, type: str, description: str, content: str, workspace: str = "default") -> str:
+    """Save or update a persistent memory entry (e.g. facts about the user, their preferences, or ongoing project context) so it can be recalled later across sessions via memory_search. `name` is a unique slug — saving again with the same name overwrites the existing entry. `type` categorizes the entry (e.g. user, preference, project, reference). `workspace` namespaces the entry (e.g. work, personal) — defaults to "default"."""
+    owner = auth.scoped_owner(workspace)
     record = await memory.save(name, type, description, content, owner=owner)
     return f"Saved memory '{record['name']}' (type={record['type']})."
 
 
 @mcp.tool
-async def memory_search(query: str, top_k: int = 5, type: str | None = None) -> str:
-    """Semantically search saved memory entries and return the most relevant ones with their full content. Optionally filter by `type`."""
-    owner = auth.current_owner() or ""
+async def memory_search(query: str, top_k: int = 5, type: str | None = None, workspace: str = "default") -> str:
+    """Semantically search saved memory entries and return the most relevant ones with their full content. Optionally filter by `type`. `workspace` scopes the search — defaults to "default"."""
+    owner = auth.scoped_owner(workspace)
     results = await memory.search(query, top_k=top_k, type=type, owner=owner)
     if not results:
         return "No memory entries found."
@@ -549,9 +549,9 @@ async def memory_search(query: str, top_k: int = 5, type: str | None = None) -> 
 
 
 @mcp.tool
-async def memory_fact_search(query: str, top_k: int = 5) -> str:
-    """Semantically search atomic facts extracted from saved memories — more precise than memory_search for narrow questions, since each fact is a single claim rather than a full memory blob."""
-    owner = auth.current_owner() or ""
+async def memory_fact_search(query: str, top_k: int = 5, workspace: str = "default") -> str:
+    """Semantically search atomic facts extracted from saved memories — more precise than memory_search for narrow questions, since each fact is a single claim rather than a full memory blob. `workspace` scopes the search — defaults to "default"."""
+    owner = auth.scoped_owner(workspace)
     results = await facts.search(owner, query, top_k=top_k)
     if not results:
         return "No facts found."
@@ -562,9 +562,22 @@ async def memory_fact_search(query: str, top_k: int = 5) -> str:
 
 
 @mcp.tool
-async def memory_list(type: str | None = None) -> str:
-    """List all saved memory entries (name, type, description, last updated) without their full content. Optionally filter by `type`."""
-    owner = auth.current_owner() or ""
+async def memory_graph_search(entity: str, workspace: str = "default") -> str:
+    """Find memories connected to a named entity via the knowledge graph (people, orgs, places, dates, concepts, projects extracted from saved facts). `workspace` scopes the search — defaults to "default"."""
+    owner = auth.scoped_owner(workspace)
+    results = await graph.search(owner, entity)
+    if not results:
+        return "No graph entries found for that entity."
+    return "\n".join(
+        f"- {r['entity_display']} ({r['entity_type']}) {r['relation']} — from '{r['source_name']}': {r['fact_content']}"
+        for r in results
+    )
+
+
+@mcp.tool
+async def memory_list(type: str | None = None, workspace: str = "default") -> str:
+    """List all saved memory entries (name, type, description, last updated) without their full content. Optionally filter by `type`. `workspace` scopes the listing — defaults to "default"."""
+    owner = auth.scoped_owner(workspace)
     entries = await memory.list_entries(type=type, owner=owner)
     if not entries:
         return "No memory entries found."
@@ -575,9 +588,9 @@ async def memory_list(type: str | None = None) -> str:
 
 
 @mcp.tool
-async def memory_delete(name: str) -> str:
-    """Delete a saved memory entry by name."""
-    owner = auth.current_owner() or ""
+async def memory_delete(name: str, workspace: str = "default") -> str:
+    """Delete a saved memory entry by name. `workspace` scopes the lookup — defaults to "default"."""
+    owner = auth.scoped_owner(workspace)
     deleted = await memory.delete(name, owner=owner)
     if not deleted:
         raise ToolError(f"No memory entry named '{name}' found.")
@@ -586,8 +599,8 @@ async def memory_delete(name: str) -> str:
 
 @mcp.resource("memory://context")
 async def memory_context() -> str:
-    """Your current memory context — all saved facts about this user. Loaded automatically."""
-    owner = auth.current_owner() or ""
+    """Your current memory context — all saved facts about this user (default workspace only). Loaded automatically."""
+    owner = auth.scoped_owner()
     entries = await memory.list_entries(owner=owner)
     if not entries:
         return "No memories saved yet for this user."
@@ -601,7 +614,7 @@ async def memory_context() -> str:
 @mcp.prompt()
 async def session_summary() -> str:
     """Call this at the end of a session to save a structured summary of what was discussed and decided."""
-    owner = auth.current_owner() or ""
+    owner = auth.scoped_owner()
     existing = await memory.list_entries(owner=owner)
     names = ", ".join(e["name"] for e in existing) if existing else "none yet"
     return (
