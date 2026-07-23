@@ -40,7 +40,7 @@ indexes — no in-Python similarity loop.
 | `fetch_page` / `fetch_pages` | Render page(s) via headless Chromium (Firefox fallback), return markdown. `readability=True` strips nav/sidebars. |
 | `screenshot_page` | PNG screenshot of a page. |
 | `fetch_image` | Download an image with a desktop User-Agent + optional Referer. |
-| `search_web` | Web search via Brave Search API, falls back to SerpAPI on quota exceeded. |
+| `search_web` | Web search via a self-hosted SearXNG instance — no paid API. |
 | `check_url` | Verify a URL actually resolves — catches dead links and hallucinated URLs. |
 | `verify_quote` | Check whether a quoted string appears verbatim on a page — catches fabricated/misremembered citations, fuzzy-matches (`rapidfuzz`) the closest passage if not exact. |
 | `memory_save` / `memory_search` / `memory_list` / `memory_delete` | Persistent memory CRUD, per-user (scoped by JWT `owner`). |
@@ -108,7 +108,8 @@ Each service has an `.env.example` with inline comments for every variable. Nota
 
 - `core-mcp`: `CONTINUUM_DATABASE_URL`, `CONTINUUM_JWT_PUBLIC_KEY`,
   `CONTINUUM_FACT_EXTRACTION_MODEL`/`_API_KEY` (litellm model string, e.g.
-  `anthropic/claude-haiku-4-5-20251001`), `CONTINUUM_BRAVE_API_KEY` (optional, for `search_web`)
+  `anthropic/claude-haiku-4-5-20251001`), `CONTINUUM_SEARXNG_URL` (optional, for `search_web` —
+  defaults to the self-hosted `searxng` service in the root compose file)
 - `backend`: `DATABASE_URL`, Clerk keys, `CONTINUUM_BACKEND_JWT_PRIVATE_KEY` (paired with
   core-mcp's public key)
 - `frontend`: Clerk keys, `BACKEND_INTERNAL_URL`

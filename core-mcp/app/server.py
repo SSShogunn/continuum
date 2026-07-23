@@ -37,8 +37,7 @@ DEFAULT_USER_AGENT = (
 
 HTTP2_ERROR_MARKERS = ("ERR_HTTP2_PROTOCOL_ERROR", "ERR_HTTP2", "ERR_CONNECTION_RESET")
 
-BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
-SERPAPI_SEARCH_URL = "https://serpapi.com/search"
+SEARXNG_URL = os.environ.get("CONTINUUM_SEARXNG_URL", "http://searxng:8080")
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
@@ -363,57 +362,22 @@ async def fetch_image(image_url: str, referer: str | None = None) -> Image:
     return Image(data=response.content, format=fmt)
 
 
-async def _brave_search(query: str, count: int) -> list[dict]:
-    api_key = os.environ.get("CONTINUUM_BRAVE_API_KEY", "")
-    if not api_key:
-        raise ToolError("CONTINUUM_BRAVE_API_KEY is not configured.")
-
+async def _searxng_search(query: str, count: int) -> list[dict]:
     async with httpx.AsyncClient() as client:
         response = await client.get(
-            BRAVE_SEARCH_URL,
-            params={"q": query, "count": count},
-            headers={"Accept": "application/json", "X-Subscription-Token": api_key},
+            f"{SEARXNG_URL}/search",
+            params={"q": query, "format": "json"},
             timeout=15.0,
-        )
-
-    if response.status_code == 429:
-        raise httpx.HTTPStatusError(
-            "Brave Search quota exceeded", request=response.request, response=response
         )
     response.raise_for_status()
 
-    results = response.json().get("web", {}).get("results", [])
+    results = response.json().get("results", [])
     return [
         {
             "title": r.get("title", ""),
             "url": r.get("url", ""),
-            "snippet": r.get("description", ""),
-            "published": r.get("age") or r.get("page_age") or "",
-        }
-        for r in results[:count]
-    ]
-
-
-async def _serpapi_search(query: str, count: int) -> list[dict]:
-    api_key = os.environ.get("CONTINUUM_SERPAPI_KEY", "")
-    if not api_key:
-        raise ToolError("Brave Search quota exceeded and CONTINUUM_SERPAPI_KEY fallback is not configured.")
-
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            SERPAPI_SEARCH_URL,
-            params={"q": query, "num": count, "api_key": api_key, "engine": "google"},
-            timeout=15.0,
-        )
-    response.raise_for_status()
-
-    results = response.json().get("organic_results", [])
-    return [
-        {
-            "title": r.get("title", ""),
-            "url": r.get("link", ""),
-            "snippet": r.get("snippet", ""),
-            "published": r.get("date", ""),
+            "snippet": r.get("content", ""),
+            "published": r.get("publishedDate") or "",
         }
         for r in results[:count]
     ]
@@ -421,14 +385,8 @@ async def _serpapi_search(query: str, count: int) -> list[dict]:
 
 @mcp.tool
 async def search_web(query: str, count: int = 10) -> str:
-    """Search the web via Brave Search and return structured results (title, URL, snippet, published date). Falls back to SerpAPI if the Brave quota is exceeded."""
-    try:
-        results = await _brave_search(query, count)
-    except httpx.HTTPStatusError as exc:
-        if exc.response.status_code != 429:
-            raise ToolError(f"Brave Search request failed: {exc.response.status_code}")
-        logger.info("Brave Search quota exceeded, falling back to SerpAPI")
-        results = await _serpapi_search(query, count)
+    """Search the web via a self-hosted SearXNG instance and return structured results (title, URL, snippet, published date)."""
+    results = await _searxng_search(query, count)
 
     if not results:
         return "No results found."
