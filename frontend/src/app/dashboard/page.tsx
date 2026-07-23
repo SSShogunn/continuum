@@ -1,7 +1,27 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 interface Fact {
   content: string;
@@ -53,6 +73,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [minting, setMinting] = useState(false);
   const [mintError, setMintError] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/tokens")
@@ -79,10 +100,10 @@ export default function DashboardPage() {
     });
   }
 
-  async function deleteMemory(name: string) {
-    if (!window.confirm(`Delete memory "${name}"? This also removes its extracted facts and graph entities.`)) {
-      return;
-    }
+  async function confirmDelete() {
+    if (!pendingDelete) return;
+    const name = pendingDelete;
+    setPendingDelete(null);
     const res = await fetch(`/api/memory/${encodeURIComponent(name)}?workspace=${encodeURIComponent(workspace)}`, {
       method: "DELETE",
     });
@@ -91,7 +112,8 @@ export default function DashboardPage() {
     }
   }
 
-  function switchWorkspace(ws: string) {
+  function switchWorkspace(ws: string | null) {
+    if (!ws) return;
     setLoading(true);
     setWorkspace(ws);
   }
@@ -142,8 +164,15 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen">
-      <header className="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
-        <span className="font-semibold text-lg">Continuum</span>
+      <header className="border-b px-6 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-6">
+          <span className="font-semibold text-lg">Continuum</span>
+          <nav className="flex items-center gap-4 text-sm text-muted-foreground">
+            <Link href="/dashboard" className="text-foreground">Memory</Link>
+            <Link href="/dashboard/memory-graph" className="hover:text-foreground transition-colors">Graph</Link>
+            <Link href="/dashboard/playground" className="hover:text-foreground transition-colors">Playground</Link>
+          </nav>
+        </div>
         <UserButton />
       </header>
 
@@ -152,41 +181,38 @@ export default function DashboardPage() {
         <section>
           <h2 className="text-xl font-semibold mb-4">MCP Token</h2>
           {newToken ? (
-            <div className="bg-yellow-900/30 border border-yellow-700 rounded-lg p-4 space-y-3">
-              <p className="text-yellow-300 text-sm font-medium">
-                Copy this token now — it will not be shown again.
-              </p>
-              <code className="block text-xs break-all text-gray-200 bg-gray-900 rounded p-3 font-mono">
-                {newToken}
-              </code>
-              <button
-                onClick={copy}
-                className="px-4 py-2 rounded bg-yellow-600 hover:bg-yellow-500 text-sm font-medium transition-colors"
-              >
-                {copied ? "Copied!" : "Copy to clipboard"}
-              </button>
-            </div>
-          ) : (
-            <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
-              {activeToken ? (
-                <p className="text-sm text-gray-400">
-                  Active token: <span className="text-gray-200">{activeToken.label}</span>{" "}
-                  — created {new Date(activeToken.createdAt).toLocaleDateString()}
+            <Card className="border-yellow-700 bg-yellow-900/20">
+              <CardContent className="space-y-3">
+                <p className="text-yellow-300 text-sm font-medium">
+                  Copy this token now — it will not be shown again.
                 </p>
-              ) : (
-                <p className="text-sm text-gray-400">No active token. Generate one to use Continuum with MCP clients.</p>
-              )}
-              <button
-                onClick={mintToken}
-                disabled={minting}
-                className="px-4 py-2 rounded bg-white text-gray-950 text-sm font-medium hover:bg-gray-200 transition-colors disabled:opacity-50"
-              >
-                {minting ? "Generating…" : activeToken ? "Rotate token" : "Generate token"}
-              </button>
-              {mintError && (
-                <p className="text-red-400 text-xs mt-2 font-mono">{mintError}</p>
-              )}
-            </div>
+                <code className="block text-xs break-all bg-black/30 rounded p-3 font-mono">
+                  {newToken}
+                </code>
+                <Button onClick={copy} className="bg-yellow-600 hover:bg-yellow-500 text-white">
+                  {copied ? "Copied!" : "Copy to clipboard"}
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardContent className="space-y-3">
+                {activeToken ? (
+                  <p className="text-sm text-muted-foreground">
+                    Active token: <span className="text-foreground">{activeToken.label}</span>{" "}
+                    — created {new Date(activeToken.createdAt).toLocaleDateString()}
+                  </p>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No active token. Generate one to use Continuum with MCP clients.</p>
+                )}
+                <Button onClick={mintToken} disabled={minting}>
+                  {minting ? "Generating…" : activeToken ? "Rotate token" : "Generate token"}
+                </Button>
+                {mintError && (
+                  <p className="text-destructive text-xs mt-2 font-mono">{mintError}</p>
+                )}
+              </CardContent>
+            </Card>
           )}
         </section>
 
@@ -195,45 +221,43 @@ export default function DashboardPage() {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-semibold">Memory</h2>
             <div className="flex items-center gap-2">
-              <select
-                value={workspace}
-                onChange={(e) => switchWorkspace(e.target.value)}
-                className="bg-gray-900 border border-gray-800 rounded text-sm px-2 py-1.5"
-              >
-                {workspaces.map((ws) => (
-                  <option key={ws} value={ws}>
-                    {ws}
-                  </option>
-                ))}
-              </select>
-              <input
+              <Select value={workspace} onValueChange={switchWorkspace}>
+                <SelectTrigger className="w-32">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {workspaces.map((ws) => (
+                    <SelectItem key={ws} value={ws}>
+                      {ws}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Input
                 value={newWorkspace}
                 onChange={(e) => setNewWorkspace(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && switchToNewWorkspace()}
                 placeholder="new workspace…"
-                className="bg-gray-900 border border-gray-800 rounded text-sm px-2 py-1.5 w-32 placeholder:text-gray-600"
+                className="w-32"
               />
-              <button
-                onClick={switchToNewWorkspace}
-                className="px-2 py-1.5 rounded bg-gray-800 hover:bg-gray-700 text-sm transition-colors"
-              >
+              <Button variant="secondary" onClick={switchToNewWorkspace}>
                 Go
-              </button>
+              </Button>
             </div>
           </div>
 
           {loading ? (
-            <p className="text-gray-500 text-sm">Loading…</p>
+            <p className="text-muted-foreground text-sm">Loading…</p>
           ) : memory.length === 0 ? (
-            <p className="text-gray-500 text-sm">
+            <p className="text-muted-foreground text-sm">
               No memory entries in &quot;{workspace}&quot; yet. Use your MCP token with an AI client to create some.
             </p>
           ) : (
-            <ul className="space-y-2">
+            <div className="space-y-2">
               {memory.map((e) => {
                 const isOpen = expanded.has(e.name);
                 return (
-                  <li key={e.name} className="bg-gray-900 border border-gray-800 rounded-lg">
+                  <Card key={e.name} className="py-0 overflow-hidden">
                     <button
                       onClick={() => toggleExpanded(e.name)}
                       className="w-full text-left px-4 py-3"
@@ -241,27 +265,27 @@ export default function DashboardPage() {
                       <div className="flex items-center justify-between">
                         <span className="font-medium text-sm">{e.name}</span>
                         <div className="flex items-center gap-2">
-                          <span className="text-xs text-gray-500 bg-gray-800 px-2 py-0.5 rounded">{e.type}</span>
-                          <span className="text-gray-600 text-xs">{isOpen ? "▾" : "▸"}</span>
+                          <Badge variant="secondary">{e.type}</Badge>
+                          <span className="text-muted-foreground text-xs">{isOpen ? "▾" : "▸"}</span>
                         </div>
                       </div>
-                      <p className="text-gray-400 text-xs mt-1">{e.description}</p>
-                      <p className="text-gray-600 text-xs mt-1">Updated {new Date(e.updated_at).toLocaleString()}</p>
+                      <p className="text-muted-foreground text-xs mt-1">{e.description}</p>
+                      <p className="text-muted-foreground/70 text-xs mt-1">Updated {new Date(e.updated_at).toLocaleString()}</p>
                     </button>
 
                     {isOpen && (
-                      <div className="px-4 pb-4 space-y-4 border-t border-gray-800 pt-3">
+                      <div className="px-4 pb-4 space-y-4 border-t pt-3">
                         <div>
-                          <h3 className="text-xs font-medium text-gray-500 uppercase mb-1">Content</h3>
-                          <p className="text-sm text-gray-300 whitespace-pre-wrap">{e.content}</p>
+                          <h3 className="text-xs font-medium text-muted-foreground uppercase mb-1">Content</h3>
+                          <p className="text-sm whitespace-pre-wrap">{e.content}</p>
                         </div>
 
                         {e.facts.length > 0 && (
                           <div>
-                            <h3 className="text-xs font-medium text-gray-500 uppercase mb-1">Facts</h3>
+                            <h3 className="text-xs font-medium text-muted-foreground uppercase mb-1">Facts</h3>
                             <ul className="list-disc list-inside space-y-1">
                               {e.facts.map((f, i) => (
-                                <li key={i} className="text-sm text-gray-300">
+                                <li key={i} className="text-sm">
                                   {f.content}
                                 </li>
                               ))}
@@ -271,14 +295,14 @@ export default function DashboardPage() {
 
                         {e.entities.length > 0 && (
                           <div>
-                            <h3 className="text-xs font-medium text-gray-500 uppercase mb-1">Entities</h3>
+                            <h3 className="text-xs font-medium text-muted-foreground uppercase mb-1">Entities</h3>
                             <div className="flex flex-wrap gap-1.5">
                               {e.entities.map((ent, i) => (
                                 <span
                                   key={i}
                                   title={ent.relation}
                                   className={`text-xs px-2 py-0.5 rounded ${
-                                    ENTITY_TYPE_COLORS[ent.entity_type] ?? "bg-gray-800 text-gray-300"
+                                    ENTITY_TYPE_COLORS[ent.entity_type] ?? "bg-muted text-muted-foreground"
                                   }`}
                                 >
                                   {ent.entity_display}
@@ -289,21 +313,37 @@ export default function DashboardPage() {
                           </div>
                         )}
 
-                        <button
-                          onClick={() => deleteMemory(e.name)}
-                          className="text-xs px-3 py-1.5 rounded bg-red-950 hover:bg-red-900 text-red-300 transition-colors"
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => setPendingDelete(e.name)}
                         >
                           Delete
-                        </button>
+                        </Button>
                       </div>
                     )}
-                  </li>
+                  </Card>
                 );
               })}
-            </ul>
+            </div>
           )}
         </section>
       </main>
+
+      <Dialog open={pendingDelete !== null} onOpenChange={(open) => !open && setPendingDelete(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete memory?</DialogTitle>
+            <DialogDescription>
+              Delete &quot;{pendingDelete}&quot;? This also removes its extracted facts and graph entities.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingDelete(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={confirmDelete}>Delete</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

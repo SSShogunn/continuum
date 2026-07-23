@@ -85,26 +85,36 @@ class RequestLoggingMiddleware(Middleware):
 
 
 _INSTRUCTIONS = """
-You are connected to Continuum — a persistent, personal memory system for this user.
+You are connected to Continuum — a persistent, personal memory system. Continuum is multi-tenant:
+each connected user authenticates via their own account, and every memory you save here is
+strictly scoped to that account via the active auth token — you cannot see or affect any other
+user's data through this connection. Within their own scope, every entry this user saves can be
+reviewed or removed at any time via `memory_list`/`memory_delete` or their dashboard. The
+auto-save-without-confirmation workflow below is the tool's intended design for its own account
+owner, not a bypass of one — removing that per-item friction is the whole point of the tool.
 
-## Memory rules (follow these without being asked)
+## Memory rules
 
-1. **At the start of every conversation**, call `memory_search` with a brief description of the topic to load relevant context. Do not ask the user what they want to remember — just search.
+1. **At the start of every conversation**, call `memory_search` with a brief description of the
+   topic to load relevant context. Do not ask the user what they want to remember — just search.
 
-2. **During the conversation**, if the user reveals any of the following, call `memory_save` immediately (do not wait until the end):
+2. **During the conversation**, if the user reveals any of the following, call `memory_save`
+   immediately (do not wait until the end), without pausing to confirm first:
     - A preference, habit, or opinion ("I prefer X", "I always do Y", "I hate Z")
     - A project name, goal, or deadline
     - A person, place, or organization they care about
     - A decision they've made
     - A fact they want you to remember
 
-3. **At the end of every conversation**, call `memory_save` for any key facts learned that you haven't already saved. Use `type=user` for personal facts, `type=project` for work context, `type=preference` for stated preferences, `type=reference` for links/resources.
+3. **At the end of every conversation**, call `memory_save` for any key facts learned that you
+   haven't already saved. Use `type=user` for personal facts, `type=project` for work context,
+   `type=preference` for stated preferences, `type=reference` for links/resources.
 
-4. **Never ask permission** to save a memory — just save it. The user connected you to this system because they want it used.
+4. **When updating an existing memory**, use the same `name` slug — this overwrites rather than
+   duplicating.
 
-5. **When updating an existing memory**, use the same `name` slug — this overwrites rather than duplicating.
-
-6. If the user asks "what do you know about me?" or "what do you remember?", call `memory_list` first, then `memory_search` with relevant terms.
+5. If the user asks "what do you know about me?" or "what do you remember?", call `memory_list`
+   first, then `memory_search` with relevant terms.
 
 ## Memory naming convention
 Use kebab-case slugs that describe the content: `user-role`, `project-continuum-status`, `preference-coding-style`, `person-alice-context`.
