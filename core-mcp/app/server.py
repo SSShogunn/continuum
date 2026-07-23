@@ -158,9 +158,40 @@ async def oauth_discovery(request: Request) -> Response:
 async def internal_memory(request: Request) -> Response:
     if not _check_internal_secret(request):
         return Response("Forbidden", status_code=403)
-    owner = request.query_params.get("owner", "")
-    entries = await memory.list_entries(owner=owner)
-    return JSONResponse({"owner": owner, "entries": entries})
+    clerk_id = request.query_params.get("clerk_id", "")
+    workspace = request.query_params.get("workspace", "default")
+    owner = auth.compose_owner(clerk_id, workspace)
+
+    entries = await memory.list_full(owner)
+    owner_facts = await facts.list_by_owner(owner)
+    owner_entities = await graph.list_by_owner(owner)
+
+    facts_by_source: dict[str, list[dict]] = {}
+    for f in owner_facts:
+        facts_by_source.setdefault(f["source_name"], []).append(f)
+    entities_by_source: dict[str, list[dict]] = {}
+    for e in owner_entities:
+        entities_by_source.setdefault(e["source_name"], []).append(e)
+
+    for entry in entries:
+        entry["facts"] = facts_by_source.get(entry["name"], [])
+        entry["entities"] = entities_by_source.get(entry["name"], [])
+
+    return JSONResponse({
+        "workspace": workspace,
+        "workspaces": await memory.list_workspaces(clerk_id),
+        "entries": entries,
+    })
+
+
+@mcp.custom_route("/internal/memory/delete", methods=["POST"])
+async def internal_memory_delete(request: Request) -> Response:
+    if not _check_internal_secret(request):
+        return Response("Forbidden", status_code=403)
+    body = await request.json()
+    owner = auth.compose_owner(body.get("clerk_id", ""), body.get("workspace", "default"))
+    deleted = await memory.delete(body["name"], owner=owner)
+    return JSONResponse({"deleted": deleted})
 
 
 @mcp.custom_route("/internal/stats", methods=["GET"])

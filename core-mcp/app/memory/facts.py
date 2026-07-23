@@ -109,6 +109,27 @@ async def extract(owner: str, name: str, text: str) -> None:
     graph.schedule_extract(owner, inserted)
 
 
+async def list_by_owner(owner: str) -> list[dict]:
+    async with pg.pool().acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT source_name, content, valid_from
+            FROM fact
+            WHERE owner = $1 AND invalidated_at IS NULL
+            ORDER BY source_name, valid_from
+            """,
+            owner,
+        )
+    return [
+        {
+            "source_name": row["source_name"],
+            "content": row["content"],
+            "valid_from": row["valid_from"].isoformat(),
+        }
+        for row in rows
+    ]
+
+
 async def search(owner: str, query: str, top_k: int = 5) -> list[dict]:
     query_embedding = await embed(query)
     async with pg.pool().acquire() as conn:

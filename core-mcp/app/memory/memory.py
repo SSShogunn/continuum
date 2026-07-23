@@ -95,6 +95,37 @@ async def list_entries(type: str | None = None, owner: str = "") -> list[dict]:
     ]
 
 
+async def list_full(owner: str = "") -> list[dict]:
+    async with pg.pool().acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT name, type, description, content, updated_at FROM memory "
+            "WHERE owner = $1 ORDER BY updated_at DESC",
+            owner,
+        )
+    return [
+        {
+            "name": row["name"],
+            "type": row["type"],
+            "description": row["description"],
+            "content": row["content"],
+            "updated_at": row["updated_at"].isoformat() if hasattr(row["updated_at"], "isoformat") else row["updated_at"],
+        }
+        for row in rows
+    ]
+
+
+async def list_workspaces(clerk_id: str) -> list[str]:
+    async with pg.pool().acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT DISTINCT owner FROM memory WHERE owner LIKE $1",
+            f"{clerk_id}:%",
+        )
+    prefix_len = len(clerk_id) + 1
+    workspaces = {row["owner"][prefix_len:] for row in rows}
+    workspaces.add("default")
+    return sorted(workspaces)
+
+
 async def delete(name: str, owner: str = "") -> bool:
     async with pg.pool().acquire() as conn:
         result = await conn.execute(

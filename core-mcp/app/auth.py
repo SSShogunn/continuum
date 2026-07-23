@@ -19,5 +19,9 @@ def current_owner() -> str | None:
     return token.client_id if token else None
 
 
+def compose_owner(clerk_id: str, workspace: str = "default") -> str:
+    return f"{clerk_id}:{workspace}"
+
+
 def scoped_owner(workspace: str = "default") -> str:
-    return f"{current_owner() or ''}:{workspace}"
+    return compose_owner(current_owner() or "", workspace)

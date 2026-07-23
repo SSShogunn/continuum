@@ -117,6 +117,29 @@ async def extract(owner: str, facts: list[tuple[int, str]]) -> None:
     logger.info("Extracted %d entity edges for %s (%d facts)", len(entities), owner, len(facts))
 
 
+async def list_by_owner(owner: str) -> list[dict]:
+    async with pg.pool().acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT f.source_name, fe.entity_display, fe.entity_type, fe.relation
+            FROM fact_entity fe
+            JOIN fact f ON f.id = fe.fact_id
+            WHERE fe.owner = $1 AND f.invalidated_at IS NULL
+            ORDER BY f.source_name, fe.created_at
+            """,
+            owner,
+        )
+    return [
+        {
+            "source_name": row["source_name"],
+            "entity_display": row["entity_display"],
+            "entity_type": row["entity_type"],
+            "relation": row["relation"],
+        }
+        for row in rows
+    ]
+
+
 async def search(owner: str, entity: str) -> list[dict]:
     normalized = entity.strip().lower()
     async with pg.pool().acquire() as conn:
