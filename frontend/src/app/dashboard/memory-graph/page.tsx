@@ -1,21 +1,34 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import Link from "next/link";
-import { UserButton } from "@clerk/nextjs";
-import type { GraphNode as ReaGraphNode, GraphEdge as ReaGraphEdge } from "reagraph";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import type {
+  GraphCanvasRef,
+  GraphNode as ReaGraphNode,
+  GraphEdge as ReaGraphEdge,
+  Theme as ReaGraphTheme,
+} from "reagraph";
+import { Maximize, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
+import { useWorkspace } from "@/lib/workspace-context";
+import { useTheme } from "@/lib/theme-context";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 
 const GraphCanvas = dynamic(() => import("reagraph").then((m) => m.GraphCanvas), { ssr: false });
+
+const CONTROL_BUTTON_CLASS =
+  "flex items-center justify-center rounded-md border bg-secondary/40 size-8 hover:bg-secondary transition-colors";
+
+function useReagraphTheme(resolvedTheme: "light" | "dark") {
+  const [themes, setThemes] = useState<{ light: ReaGraphTheme; dark: ReaGraphTheme } | null>(null);
+
+  useEffect(() => {
+    import("reagraph").then((m) => setThemes({ light: m.lightTheme, dark: m.darkTheme }));
+  }, []);
+
+  return themes?.[resolvedTheme];
+}
 
 interface Fact {
   content: string;
@@ -119,10 +132,13 @@ function buildGraph(memory: MemoryEntry[]): { nodes: ReaGraphNode[]; edges: ReaG
 }
 
 export default function MemoryGraphPage() {
-  const [workspace, setWorkspace] = useState("default");
-  const [workspaces, setWorkspaces] = useState<string[]>(["default"]);
+  const { workspace, setWorkspaces } = useWorkspace();
+  const { resolvedTheme } = useTheme();
+  const reagraphTheme = useReagraphTheme(resolvedTheme);
   const [memory, setMemory] = useState<MemoryEntry[]>([]);
   const [selected, setSelected] = useState<{ label: string; data: NodeData } | null>(null);
+  const [search, setSearch] = useState("");
+  const [hiddenEntityTypes, setHiddenEntityTypes] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetch(`/api/memory?workspace=${encodeURIComponent(workspace)}`)
@@ -132,52 +148,100 @@ export default function MemoryGraphPage() {
         setWorkspaces(data.workspaces ?? ["default"]);
         setSelected(null);
       });
-  }, [workspace]);
+  }, [workspace, setWorkspaces]);
 
-  const { nodes, edges } = useMemo(() => buildGraph(memory), [memory]);
+  const filteredMemory = useMemo(
+    () =>
+      memory.map((m) => ({
+        ...m,
+        entities: m.entities.filter((e) => !hiddenEntityTypes.has(e.entity_type)),
+      })),
+    [memory, hiddenEntityTypes]
+  );
+
+  const { nodes, edges } = useMemo(() => buildGraph(filteredMemory), [filteredMemory]);
+
+  const selections = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return [];
+    return nodes.filter((n) => (n.label ?? "").toLowerCase().includes(q)).map((n) => n.id);
+  }, [nodes, search]);
+
+  const graphRef = useRef<GraphCanvasRef | null>(null);
+
+  useEffect(() => {
+    if (nodes.length === 0) return;
+    const id = requestAnimationFrame(() => graphRef.current?.fitNodesInView());
+    return () => cancelAnimationFrame(id);
+  }, [nodes, edges, selected]);
+
+  function toggleEntityType(type: string) {
+    setHiddenEntityTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) next.delete(type);
+      else next.add(type);
+      return next;
+    });
+  }
 
   return (
-    <div className="min-h-screen">
-      <header className="border-b px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-6">
-          <span className="font-semibold text-lg">Continuum</span>
-          <nav className="flex items-center gap-4 text-sm text-muted-foreground">
-            <Link href="/dashboard" className="hover:text-foreground transition-colors">Memory</Link>
-            <Link href="/dashboard/memory-graph" className="text-foreground">Graph</Link>
-            <Link href="/dashboard/playground" className="hover:text-foreground transition-colors">Playground</Link>
-          </nav>
-        </div>
-        <UserButton />
-      </header>
+    <main className="px-6 py-6 h-[calc(100vh-3.75rem)] flex flex-col">
+      <div className="flex items-center justify-between mb-4 gap-4 shrink-0">
+        <h2 className="text-xl font-semibold shrink-0">Memory graph</h2>
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search nodes…"
+          className="max-w-xs"
+        />
+      </div>
 
-      <main className="max-w-6xl mx-auto px-6 py-8">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-semibold">Memory graph</h2>
-          <Select value={workspace} onValueChange={(ws) => ws && setWorkspace(ws)}>
-            <SelectTrigger className="w-32">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {workspaces.map((ws) => (
-                <SelectItem key={ws} value={ws}>
-                  {ws}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      <div className="flex items-center flex-wrap gap-4 mb-4 text-xs shrink-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-muted-foreground uppercase tracking-wide">Memory</span>
+          {Object.entries(MEMORY_TYPE_COLORS).map(([type, color]) => (
+            <span key={type} className="flex items-center gap-1 text-muted-foreground">
+              <span className="size-2.5 rounded-full" style={{ backgroundColor: color }} />
+              {type}
+            </span>
+          ))}
         </div>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-muted-foreground uppercase tracking-wide mr-0.5">Entities</span>
+          {Object.entries(ENTITY_TYPE_COLORS).map(([type, color]) => {
+            const active = !hiddenEntityTypes.has(type);
+            return (
+              <button
+                key={type}
+                onClick={() => toggleEntityType(type)}
+                className={`flex items-center gap-1 rounded-full border px-2 py-0.5 transition-opacity ${
+                  active ? "opacity-100" : "opacity-40"
+                }`}
+                title={active ? `Hide ${type}` : `Show ${type}`}
+              >
+                <span className="size-2.5 rounded-full" style={{ backgroundColor: color }} />
+                {type}
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
-        <div className="flex gap-4">
-          <Card className="flex-1 overflow-hidden py-0">
-            <CardContent className="p-0 relative h-[600px]">
-              {nodes.length === 0 ? (
-                <p className="text-muted-foreground text-sm p-6">
-                  No graph data in &quot;{workspace}&quot; yet — save a memory with named entities to see connections here.
-                </p>
-              ) : (
+      <div className="flex gap-4 flex-1 min-h-0">
+        <Card className="flex-1 overflow-hidden py-0">
+          <CardContent className="p-0 relative h-full">
+            {nodes.length === 0 ? (
+              <p className="text-muted-foreground text-sm p-6">
+                No graph data in &quot;{workspace}&quot; yet — save a memory with named entities to see connections here.
+              </p>
+            ) : (
+              <>
                 <GraphCanvas
+                  ref={graphRef}
                   nodes={nodes}
                   edges={edges}
+                  selections={selections}
+                  theme={reagraphTheme}
                   layoutType="forceDirected2d"
                   labelType="all"
                   edgeArrowPosition="none"
@@ -185,35 +249,73 @@ export default function MemoryGraphPage() {
                   onNodeClick={(n) => setSelected({ label: n.label ?? n.id, data: n.data as NodeData })}
                   onCanvasClick={() => setSelected(null)}
                 />
+                <div className="absolute bottom-3 right-3 flex flex-col gap-1.5">
+                  <button
+                    className={CONTROL_BUTTON_CLASS}
+                    title="Zoom in"
+                    onClick={() => graphRef.current?.zoomIn()}
+                  >
+                    <ZoomIn className="size-4" />
+                  </button>
+                  <button
+                    className={CONTROL_BUTTON_CLASS}
+                    title="Zoom out"
+                    onClick={() => graphRef.current?.zoomOut()}
+                  >
+                    <ZoomOut className="size-4" />
+                  </button>
+                  <button
+                    className={CONTROL_BUTTON_CLASS}
+                    title="Fit to view"
+                    onClick={() => graphRef.current?.fitNodesInView()}
+                  >
+                    <Maximize className="size-4" />
+                  </button>
+                  <button
+                    className={CONTROL_BUTTON_CLASS}
+                    title="Reset view"
+                    onClick={() => graphRef.current?.resetControls()}
+                  >
+                    <RotateCcw className="size-4" />
+                  </button>
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+
+        {selected && (
+          <Card className="w-80 shrink-0 overflow-y-auto">
+            <CardContent className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="font-medium text-sm">{selected.label}</h3>
+                <Badge variant="secondary">{selected.data.typeKey}</Badge>
+              </div>
+              {selected.data.kind === "memory" && selected.data.memory && (
+                <p className="text-sm whitespace-pre-wrap">{selected.data.memory.content}</p>
+              )}
+              {selected.data.kind === "entity" && (
+                <ul className="space-y-2">
+                  {selected.data.connections.map((c, i) => (
+                    <li key={i} className="text-sm">
+                      <button
+                        className="font-medium hover:underline"
+                        onClick={() => {
+                          const m = memory.find((mm) => mm.name === c.name);
+                          if (m) setSelected({ label: m.name, data: { kind: "memory", typeKey: m.type, memory: m, connections: [] } });
+                        }}
+                      >
+                        {c.name}
+                      </button>
+                      <p className="text-xs text-muted-foreground">{c.relation}</p>
+                    </li>
+                  ))}
+                </ul>
               )}
             </CardContent>
           </Card>
-
-          {selected && (
-            <Card className="w-80 shrink-0">
-              <CardContent className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-medium text-sm">{selected.label}</h3>
-                  <Badge variant="secondary">{selected.data.typeKey}</Badge>
-                </div>
-                {selected.data.kind === "memory" && selected.data.memory && (
-                  <p className="text-sm whitespace-pre-wrap">{selected.data.memory.content}</p>
-                )}
-                {selected.data.kind === "entity" && (
-                  <ul className="space-y-2">
-                    {selected.data.connections.map((c, i) => (
-                      <li key={i} className="text-sm">
-                        <span className="font-medium">{c.name}</span>
-                        <p className="text-xs text-muted-foreground">{c.relation}</p>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      </main>
-    </div>
+        )}
+      </div>
+    </main>
   );
 }

@@ -1,8 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
-import { UserButton } from "@clerk/nextjs";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -208,20 +206,7 @@ export default function PlaygroundPage() {
   }
 
   return (
-    <div className="min-h-screen">
-      <header className="border-b px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-6">
-          <span className="font-semibold text-lg">Continuum</span>
-          <nav className="flex items-center gap-4 text-sm text-muted-foreground">
-            <Link href="/dashboard" className="hover:text-foreground transition-colors">Memory</Link>
-            <Link href="/dashboard/memory-graph" className="hover:text-foreground transition-colors">Graph</Link>
-            <Link href="/dashboard/playground" className="text-foreground">Playground</Link>
-          </nav>
-        </div>
-        <UserButton />
-      </header>
-
-      <main className="max-w-2xl mx-auto px-6 py-10 space-y-6">
+    <main className="max-w-2xl mx-auto px-6 py-10 space-y-6">
         <h2 className="text-xl font-semibold">Tool playground</h2>
 
         <Card>
@@ -314,7 +299,6 @@ export default function PlaygroundPage() {
             </CardContent>
           </Card>
         )}
-      </main>
-    </div>
+    </main>
   );
 }

@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { UserButton } from "@clerk/nextjs";
+import { AppHeader } from "@/components/app-header";
+import { Card, CardContent } from "@/components/ui/card";
 
 interface User {
   id: string;
@@ -48,47 +49,52 @@ export default function AdminPage() {
   }, []);
 
   if (loading) {
-    return <div className="flex min-h-screen items-center justify-center text-gray-500">Loading…</div>;
+    return (
+      <div className="flex min-h-screen items-center justify-center text-muted-foreground">Loading…</div>
+    );
   }
 
   if (forbidden) {
     return (
       <div className="flex min-h-screen items-center justify-center flex-col gap-4">
-        <p className="text-gray-400">You don&apos;t have permission to view this page.</p>
+        <p className="text-muted-foreground">You don&apos;t have permission to view this page.</p>
       </div>
     );
   }
 
   return (
     <div className="min-h-screen">
-      <header className="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
-        <span className="font-semibold text-lg">Continuum — Admin</span>
-        <UserButton />
-      </header>
+      <AppHeader />
 
       <main className="max-w-4xl mx-auto px-6 py-10 space-y-12">
         {/* Stats */}
         {stats && (
           <section>
-            <h2 className="text-xl font-semibold mb-4">Usage Stats</h2>
+            <h2 className="text-xl font-semibold mb-4">Usage stats (global)</h2>
             <div className="grid grid-cols-3 gap-4 mb-6">
-              <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
-                <p className="text-gray-400 text-xs mb-1">Total requests</p>
-                <p className="text-2xl font-semibold">{stats.total_requests}</p>
-              </div>
-              <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
-                <p className="text-gray-400 text-xs mb-1">Total errors</p>
-                <p className="text-2xl font-semibold">{stats.total_errors}</p>
-              </div>
-              <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
-                <p className="text-gray-400 text-xs mb-1">Error rate</p>
-                <p className="text-2xl font-semibold">{(stats.error_rate * 100).toFixed(1)}%</p>
-              </div>
+              <Card>
+                <CardContent>
+                  <p className="text-muted-foreground text-xs mb-1">Total requests</p>
+                  <p className="text-2xl font-semibold">{stats.total_requests}</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent>
+                  <p className="text-muted-foreground text-xs mb-1">Total errors</p>
+                  <p className="text-2xl font-semibold">{stats.total_errors}</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent>
+                  <p className="text-muted-foreground text-xs mb-1">Error rate</p>
+                  <p className="text-2xl font-semibold">{(stats.error_rate * 100).toFixed(1)}%</p>
+                </CardContent>
+              </Card>
             </div>
             {stats.per_tool.length > 0 && (
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-left text-gray-500 border-b border-gray-800">
+                  <tr className="text-left text-muted-foreground border-b">
                     <th className="pb-2">Tool</th>
                     <th className="pb-2">Calls</th>
                     <th className="pb-2">Errors</th>
@@ -97,8 +103,8 @@ export default function AdminPage() {
                 </thead>
                 <tbody>
                   {stats.per_tool.map((t) => (
-                    <tr key={t.tool} className="border-b border-gray-900">
-                      <td className="py-2 font-mono text-gray-300">{t.tool}</td>
+                    <tr key={t.tool} className="border-b border-border/50">
+                      <td className="py-2 font-mono">{t.tool}</td>
                       <td className="py-2">{t.calls}</td>
                       <td className="py-2">{t.errors}</td>
                       <td className="py-2">{t.avg_duration_ms}ms</td>
@@ -115,7 +121,7 @@ export default function AdminPage() {
           <h2 className="text-xl font-semibold mb-4">Users ({users.length})</h2>
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-left text-gray-500 border-b border-gray-800">
+              <tr className="text-left text-muted-foreground border-b">
                 <th className="pb-2">Email</th>
                 <th className="pb-2">Admin</th>
                 <th className="pb-2">Joined</th>
@@ -124,11 +130,11 @@ export default function AdminPage() {
             </thead>
             <tbody>
               {users.map((u) => (
-                <tr key={u.id} className="border-b border-gray-900">
-                  <td className="py-2 text-gray-300">{u.email ?? "—"}</td>
+                <tr key={u.id} className="border-b border-border/50">
+                  <td className="py-2">{u.email ?? "—"}</td>
                   <td className="py-2">{u.isAdmin ? "✓" : "—"}</td>
-                  <td className="py-2 text-gray-500">{new Date(u.createdAt).toLocaleDateString()}</td>
-                  <td className="py-2 text-gray-500">
+                  <td className="py-2 text-muted-foreground">{new Date(u.createdAt).toLocaleDateString()}</td>
+                  <td className="py-2 text-muted-foreground">
                     {u.lastSignInAt ? new Date(u.lastSignInAt).toLocaleDateString() : "—"}
                   </td>
                 </tr>

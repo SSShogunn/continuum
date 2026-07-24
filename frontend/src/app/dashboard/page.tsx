@@ -1,19 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
-import { UserButton } from "@clerk/nextjs";
+import { useWorkspace } from "@/lib/workspace-context";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -62,18 +53,18 @@ const ENTITY_TYPE_COLORS: Record<string, string> = {
 };
 
 export default function DashboardPage() {
-  const [workspace, setWorkspace] = useState("default");
-  const [workspaces, setWorkspaces] = useState<string[]>(["default"]);
-  const [newWorkspace, setNewWorkspace] = useState("");
+  const { workspace, setWorkspaces } = useWorkspace();
   const [memory, setMemory] = useState<MemoryEntry[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [tokens, setTokens] = useState<TokenMeta[]>([]);
   const [newToken, setNewToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loadedWorkspace, setLoadedWorkspace] = useState<string | null>(null);
   const [minting, setMinting] = useState(false);
   const [mintError, setMintError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+
+  const loading = loadedWorkspace !== workspace;
 
   useEffect(() => {
     fetch("/api/tokens")
@@ -87,9 +78,9 @@ export default function DashboardPage() {
       .then((data) => {
         setMemory(data.entries ?? []);
         setWorkspaces(data.workspaces ?? ["default"]);
-        setLoading(false);
+        setLoadedWorkspace(workspace);
       });
-  }, [workspace]);
+  }, [workspace, setWorkspaces]);
 
   function toggleExpanded(name: string) {
     setExpanded((prev) => {
@@ -110,20 +101,6 @@ export default function DashboardPage() {
     if (res.ok) {
       setMemory((prev) => prev.filter((e) => e.name !== name));
     }
-  }
-
-  function switchWorkspace(ws: string | null) {
-    if (!ws) return;
-    setLoading(true);
-    setWorkspace(ws);
-  }
-
-  function switchToNewWorkspace() {
-    const ws = newWorkspace.trim();
-    if (!ws) return;
-    if (!workspaces.includes(ws)) setWorkspaces((prev) => [...prev, ws]);
-    switchWorkspace(ws);
-    setNewWorkspace("");
   }
 
   async function mintToken() {
@@ -163,19 +140,7 @@ export default function DashboardPage() {
   const activeToken = tokens.find((t) => !t.revokedAt);
 
   return (
-    <div className="min-h-screen">
-      <header className="border-b px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-6">
-          <span className="font-semibold text-lg">Continuum</span>
-          <nav className="flex items-center gap-4 text-sm text-muted-foreground">
-            <Link href="/dashboard" className="text-foreground">Memory</Link>
-            <Link href="/dashboard/memory-graph" className="hover:text-foreground transition-colors">Graph</Link>
-            <Link href="/dashboard/playground" className="hover:text-foreground transition-colors">Playground</Link>
-          </nav>
-        </div>
-        <UserButton />
-      </header>
-
+    <>
       <main className="max-w-3xl mx-auto px-6 py-10 space-y-12">
         {/* MCP Token */}
         <section>
@@ -218,33 +183,7 @@ export default function DashboardPage() {
 
         {/* Memory */}
         <section>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold">Memory</h2>
-            <div className="flex items-center gap-2">
-              <Select value={workspace} onValueChange={switchWorkspace}>
-                <SelectTrigger className="w-32">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {workspaces.map((ws) => (
-                    <SelectItem key={ws} value={ws}>
-                      {ws}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Input
-                value={newWorkspace}
-                onChange={(e) => setNewWorkspace(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && switchToNewWorkspace()}
-                placeholder="new workspace…"
-                className="w-32"
-              />
-              <Button variant="secondary" onClick={switchToNewWorkspace}>
-                Go
-              </Button>
-            </div>
-          </div>
+          <h2 className="text-xl font-semibold mb-4">Memory</h2>
 
           {loading ? (
             <p className="text-muted-foreground text-sm">Loading…</p>
@@ -344,6 +283,6 @@ export default function DashboardPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 }

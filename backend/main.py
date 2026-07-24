@@ -6,7 +6,7 @@ from fastapi import Depends, FastAPI
 from app.config import settings
 from app.db import connect, disconnect
 from app.deps import get_current_user
-from app.routes import admin, memory, oauth, playground, tokens
+from app.routes import admin, memory, oauth, playground, stats, tokens
 
 
 @asynccontextmanager
@@ -23,6 +23,7 @@ app.include_router(memory.router)
 app.include_router(admin.router)
 app.include_router(oauth.router)
 app.include_router(playground.router)
+app.include_router(stats.router)
 
 
 @app.get("/api/me")
