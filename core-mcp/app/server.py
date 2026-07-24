@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 import re
@@ -10,6 +11,7 @@ from .infra import redis as redis_infra
 from .memory import facts, graph, memory
 import html2text
 import httpx
+import litellm
 import trafilatura
 from rapidfuzz import fuzz
 from dotenv import load_dotenv
@@ -420,7 +422,7 @@ async def _searxng_search(query: str, count: int) -> list[dict]:
         {
             "title": r.get("title", ""),
             "url": r.get("url", ""),
-            "snippet": r.get("content", ""),
+            "snippet": " ".join(r.get("content", "").split()),  # collapse whitespace/newlines SearXNG sometimes includes
             "published": r.get("publishedDate") or "",
         }
         for r in results[:count]
@@ -428,18 +430,68 @@ async def _searxng_search(query: str, count: int) -> list[dict]:
 
 
 @mcp.tool
-async def search_web(query: str, count: int = 10) -> str:
-    """Search the web via a self-hosted SearXNG instance and return structured results (title, URL, snippet, published date)."""
+async def search_web(query: str, count: int = 5) -> str:
+    """Search the web via a self-hosted SearXNG instance and return structured results (title, URL, snippet, published date). Use fetch_page on a specific URL for full content."""
     results = await _searxng_search(query, count)
 
     if not results:
         return "No results found."
 
-    blocks = [
-        f"## {r['title']}\n{r['url']}\n{r['snippet']}" + (f"\n({r['published']})" if r["published"] else "")
-        for r in results
+    lines = [
+        f"{i}. {r['title']}\n   {r['url']}\n   {r['snippet']}" + (f" ({r['published']})" if r["published"] else "")
+        for i, r in enumerate(results, 1)
     ]
-    return "\n\n---\n\n".join(blocks)
+    return "\n".join(lines)
+
+
+@mcp.tool
+async def extract_structured(
+    url: str,
+    schema: str,
+    timeout_ms: int = 15000,
+) -> str:
+    """Fetch a URL and extract structured JSON data from its content. `schema` describes the
+    fields wanted — either a JSON Schema string or a plain-language description (e.g. "title,
+    author, published date, and a list of section headings"). Returns the extracted JSON as a
+    string. Best for turning an article, listing, or product page into structured data."""
+    try:
+        html, _ = await _with_engine_fallback(
+            lambda engine: _goto_and_extract(url, None, timeout_ms, engine)
+        )
+    except PlaywrightError as exc:
+        raise ToolError(f"Failed to load {url}: {_concise_error(exc)}")
+
+    text = trafilatura.extract(
+        html, url=url, output_format="markdown", favor_recall=True
+    ) or _to_markdown(html)
+
+    model = os.environ.get("CONTINUUM_EXTRACT_MODEL", "groq/llama-3.3-70b-versatile")
+    api_key = os.environ.get("CONTINUUM_EXTRACT_API_KEY", "")
+    kwargs = {"api_key": api_key} if api_key else {}
+
+    response = await litellm.acompletion(
+        model=model,
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "Extract structured data from the page content below, matching this "
+                    f"schema exactly:\n\n{schema}\n\n"
+                    "Respond with ONLY a JSON object — no explanation, no markdown fences.\n\n"
+                    f"Page content:\n\n{text[:20000]}"
+                ),
+            }
+        ],
+        response_format={"type": "json_object"},
+        **kwargs,
+    )
+    raw = response.choices[0].message.content
+
+    try:
+        json.loads(raw)
+    except json.JSONDecodeError:
+        raise ToolError(f"Model did not return valid JSON: {raw[:500]}")
+    return raw
 
 
 async def _check_one_url(url: str) -> dict:
