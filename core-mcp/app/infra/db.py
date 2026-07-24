@@ -29,8 +29,8 @@ async def _run_worker() -> None:
             async with pg.pool().acquire() as conn:
                 await conn.execute(
                     "INSERT INTO requests "
-                    "(timestamp, tool, arguments, status, response, error, duration_ms) "
-                    "VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                    "(timestamp, tool, arguments, status, response, error, duration_ms, owner) "
+                    "VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
                     *record,
                 )
         except Exception:
@@ -46,6 +46,7 @@ def log_request(
     response: str | None = None,
     error: str | None = None,
     duration_ms: float | None = None,
+    owner: str | None = None,
 ) -> None:
     if _queue is None:
         return
@@ -57,6 +58,7 @@ def log_request(
         _truncate(response),
         _truncate(error),
         duration_ms,
+        owner,
     )
     try:
         _queue.put_nowait(record)
@@ -64,20 +66,27 @@ def log_request(
         logger.warning("Request log queue full; dropping record for %s", tool)
 
 
-async def get_stats() -> dict:
+async def get_stats(owner: str | None = None) -> dict:
+    owner_clause = "WHERE owner = $1" if owner else ""
+    owner_and_error_clause = "WHERE owner = $1 AND status = 'error'" if owner else "WHERE status = 'error'"
+    args = (owner,) if owner else ()
     async with pg.pool().acquire() as conn:
-        total = await conn.fetchval("SELECT COUNT(*) FROM requests")
-        errors = await conn.fetchval("SELECT COUNT(*) FROM requests WHERE status = 'error'")
+        total = await conn.fetchval(f"SELECT COUNT(*) FROM requests {owner_clause}", *args)
+        errors = await conn.fetchval(
+            f"SELECT COUNT(*) FROM requests {owner_and_error_clause}", *args
+        )
         per_tool = await conn.fetch(
-            """
+            f"""
             SELECT tool,
                    COUNT(*)                                   AS calls,
                    COUNT(*) FILTER (WHERE status = 'error')  AS errors,
                    AVG(duration_ms)                           AS avg_duration_ms
             FROM requests
+            {owner_clause}
             GROUP BY tool
             ORDER BY calls DESC
-            """
+            """,
+            *args,
         )
     return {
         "total_requests": total,
@@ -93,6 +102,33 @@ async def get_stats() -> dict:
             for row in per_tool
         ],
     }
+
+
+async def get_timeseries(owner: str | None = None, days: int = 14) -> list[dict]:
+    owner_clause = "AND owner = $2" if owner else ""
+    args = (days, owner) if owner else (days,)
+    async with pg.pool().acquire() as conn:
+        rows = await conn.fetch(
+            f"""
+            SELECT date_trunc('day', timestamp)               AS day,
+                   COUNT(*)                                   AS calls,
+                   COUNT(*) FILTER (WHERE status = 'error')  AS errors
+            FROM requests
+            WHERE timestamp >= now() - make_interval(days => $1)
+            {owner_clause}
+            GROUP BY day
+            ORDER BY day
+            """,
+            *args,
+        )
+    return [
+        {
+            "day": row["day"].date().isoformat(),
+            "calls": row["calls"],
+            "errors": row["errors"],
+        }
+        for row in rows
+    ]
 
 
 async def start() -> None:

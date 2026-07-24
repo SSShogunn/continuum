@@ -5,6 +5,7 @@ import os
 import re
 import signal
 import time
+from typing import Any
 from . import auth
 from .infra import browser_pool, db, pg
 from .infra import redis as redis_infra
@@ -69,13 +70,14 @@ class RequestLoggingMiddleware(Middleware):
     async def on_call_tool(self, context: MiddlewareContext, call_next):
         tool = context.message.name
         arguments = context.message.arguments
+        owner = auth.current_owner()
         started = time.perf_counter()
         try:
             result = await call_next(context)
         except Exception as exc:
             duration = (time.perf_counter() - started) * 1000
             db.log_request(
-                tool, arguments, "error", error=repr(exc), duration_ms=duration
+                tool, arguments, "error", error=repr(exc), duration_ms=duration, owner=owner
             )
             raise
         duration = (time.perf_counter() - started) * 1000
@@ -85,6 +87,7 @@ class RequestLoggingMiddleware(Middleware):
             "ok",
             response=str(getattr(result, "content", result)),
             duration_ms=duration,
+            owner=owner,
         )
         return result
 
@@ -213,7 +216,9 @@ async def internal_memory_delete(request: Request) -> Response:
 async def internal_stats(request: Request) -> Response:
     if not _check_internal_secret(request):
         return Response("Forbidden", status_code=403)
-    stats = await db.get_stats()
+    clerk_id = request.query_params.get("clerk_id") or None
+    stats = await db.get_stats(owner=clerk_id)
+    stats["timeseries"] = await db.get_timeseries(owner=clerk_id)
     return JSONResponse(stats)
 
 
@@ -467,7 +472,7 @@ async def extract_structured(
 
     model = os.environ.get("CONTINUUM_EXTRACT_MODEL", "groq/llama-3.3-70b-versatile")
     api_key = os.environ.get("CONTINUUM_EXTRACT_API_KEY", "")
-    kwargs = {"api_key": api_key} if api_key else {}
+    kwargs: dict[str, Any] = {"api_key": api_key} if api_key else {}
 
     response = await litellm.acompletion(
         model=model,
@@ -485,7 +490,11 @@ async def extract_structured(
         response_format={"type": "json_object"},
         **kwargs,
     )
+    if not isinstance(response, litellm.ModelResponse):
+        raise ToolError("Unexpected streaming response from model.")
     raw = response.choices[0].message.content
+    if raw is None:
+        raise ToolError("Model returned no content.")
 
     try:
         json.loads(raw)
