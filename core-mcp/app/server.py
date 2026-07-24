@@ -6,6 +6,7 @@ import signal
 import time
 from . import auth
 from .infra import browser_pool, db, pg
+from .infra import redis as redis_infra
 from .memory import facts, graph, memory
 import html2text
 import httpx
@@ -49,6 +50,7 @@ logger = logging.getLogger("continuum")
 async def lifespan(server: "FastMCP"):
     await browser_pool.start()
     await pg.start()
+    await redis_infra.start()
     await db.start()
     await memory.start()
     try:
@@ -56,6 +58,7 @@ async def lifespan(server: "FastMCP"):
     finally:
         await memory.stop()
         await db.stop()
+        await redis_infra.stop()
         await pg.stop()
         await browser_pool.stop()
 

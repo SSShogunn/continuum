@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from ..infra import pg
+from ..infra import redis as redis_infra
 from .llm import client, is_transient_failure
 
 logger = logging.getLogger("continuum.graph")
@@ -39,7 +40,9 @@ def _on_task_done(task: asyncio.Task) -> None:
 def schedule_extract(owner: str, facts: list[tuple[int, str]]) -> None:
     if not facts:
         return
-    task = asyncio.create_task(extract(owner, facts))
+    task = asyncio.create_task(
+        redis_infra.pool().enqueue_job("extract_graph_job", owner, facts)
+    )
     _background_tasks.add(task)
     task.add_done_callback(_on_task_done)
 
@@ -57,9 +60,10 @@ async def _extract_entities_llm(facts: list[tuple[int, str]]) -> list[ExtractedE
         raise RuntimeError("CONTINUUM_FACT_EXTRACTION_MODEL is not set")
 
     numbered = "\n".join(f"{i}. {content}" for i, (_, content) in enumerate(facts))
+    # api_key is only passed when set — see the matching comment in facts.py.
+    kwargs = {"api_key": api_key} if api_key else {}
     result = await client.chat.completions.create(
         model=model,
-        api_key=api_key,
         messages=[
             {
                 "role": "user",
@@ -75,6 +79,7 @@ async def _extract_entities_llm(facts: list[tuple[int, str]]) -> list[ExtractedE
         max_retries=2,
         reasoning_effort="none",
         _skip_mcp_handler=True,
+        **kwargs,
     )
     return result.entities
 

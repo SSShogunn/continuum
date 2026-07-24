@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from ..infra import pg
+from ..infra import redis as redis_infra
 from . import graph
 from .embeddings import embed
 from .llm import client, is_transient_failure
@@ -33,7 +34,9 @@ def _on_task_done(task: asyncio.Task) -> None:
 
 
 def schedule_extract(owner: str, name: str, text: str) -> None:
-    task = asyncio.create_task(extract(owner, name, text))
+    task = asyncio.create_task(
+        redis_infra.pool().enqueue_job("extract_facts_job", owner, name, text)
+    )
     _background_tasks.add(task)
     task.add_done_callback(_on_task_done)
 
@@ -54,14 +57,19 @@ async def _extract_facts_llm(text: str) -> list[str]:
     # distinctive value); the outer tenacity retry above handles transient
     # transport failures with real exponential backoff, which instructor's
     # internal retry loop doesn't apply.
+    #
+    # api_key is only passed when set — providers like Bedrock authenticate via
+    # AWS credentials (env vars picked up by boto3), not a bearer key, and
+    # litellm rejects an explicit empty string for those.
+    kwargs = {"api_key": api_key} if api_key else {}
     result = await client.chat.completions.create(
         model=model,
-        api_key=api_key,
         messages=[{"role": "user", "content": f"Extract atomic facts from this text:\n\n{text}"}],
         response_model=ExtractedFacts,
         max_retries=2,
         reasoning_effort="none",
         _skip_mcp_handler=True,
+        **kwargs,
     )
     return [f.strip() for f in result.facts if f.strip()]
 
