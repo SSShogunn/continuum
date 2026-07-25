@@ -24,7 +24,7 @@ const THEME_INIT_SCRIPT = `
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <ClerkProvider>
-      <html lang="en" className="h-full antialiased">
+      <html lang="en" className="h-full antialiased" suppressHydrationWarning>
         <body className="min-h-full">
           <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
           <ThemeProvider>{children}</ThemeProvider>

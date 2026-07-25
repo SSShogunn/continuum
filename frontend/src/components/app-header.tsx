@@ -11,6 +11,7 @@ const NAV_LINKS = [
   { href: "/dashboard/memory-graph", label: "Graph" },
   { href: "/dashboard/playground", label: "Playground" },
   { href: "/dashboard/stats", label: "Stats" },
+  { href: "/dashboard/connections", label: "Connections" },
   { href: "/admin", label: "Admin" },
 ];
 

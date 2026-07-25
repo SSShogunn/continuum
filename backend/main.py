@@ -6,7 +6,7 @@ from fastapi import Depends, FastAPI
 from app.config import settings
 from app.db import connect, disconnect
 from app.deps import get_current_user
-from app.routes import admin, memory, oauth, playground, stats, tokens
+from app.routes import admin, connections, memory, oauth, playground, stats, tokens
 
 
 @asynccontextmanager
@@ -19,6 +19,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Continuum Backend", version="0.1.0", lifespan=lifespan)
 
 app.include_router(tokens.router)
+app.include_router(connections.router)
 app.include_router(memory.router)
 app.include_router(admin.router)
 app.include_router(oauth.router)

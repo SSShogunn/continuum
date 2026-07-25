@@ -26,10 +26,15 @@ async def mint_token(
 ):
     clerk_user_id = user["sub"]
 
-    # Revoke any existing active token for this user
+    # Revoke any existing active manual token for this user (OAuth-client
+    # tokens are a separate, independently-revocable set — see connections.py)
     await session.execute(
         update(McpToken)
-        .where(McpToken.clerkUserId == clerk_user_id, McpToken.revokedAt.is_(None))
+        .where(
+            McpToken.clerkUserId == clerk_user_id,
+            McpToken.clientId.is_(None),
+            McpToken.revokedAt.is_(None),
+        )
         .values(revokedAt=datetime.now(timezone.utc))
     )
 
@@ -57,7 +62,7 @@ async def list_tokens(
 ):
     result = await session.execute(
         select(McpToken)
-        .where(McpToken.clerkUserId == user["sub"])
+        .where(McpToken.clerkUserId == user["sub"], McpToken.clientId.is_(None))
         .order_by(McpToken.createdAt.desc())
     )
     return [

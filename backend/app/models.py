@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import ARRAY, DateTime, Index, Text, func
+from sqlalchemy import ARRAY, DateTime, ForeignKey, Index, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
@@ -46,13 +46,19 @@ class McpToken(Base):
     clerkUserId: Mapped[str] = mapped_column(Text, nullable=False)
     label: Mapped[str] = mapped_column(Text, nullable=False)
     jti: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    clientId: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("OAuthClient.id"), nullable=True
+    )
     createdAt: Mapped[datetime] = mapped_column(
         UTCDateTime, nullable=False, server_default=func.current_timestamp()
     )
     revokedAt: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     lastUsedAt: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
 
-    __table_args__ = (Index("McpToken_clerkUserId_idx", "clerkUserId"),)
+    __table_args__ = (
+        Index("McpToken_clerkUserId_idx", "clerkUserId"),
+        Index("McpToken_clientId_idx", "clientId"),
+    )
 
 
 class OAuthClient(Base):

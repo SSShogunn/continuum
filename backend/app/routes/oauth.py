@@ -146,6 +146,10 @@ async def token_exchange(
     if grant_type != "authorization_code":
         raise HTTPException(400, detail={"error": "unsupported_grant_type"})
 
+    client = await session.get(OAuthClient, client_id)
+    if not client:
+        raise HTTPException(400, detail={"error": "invalid_client"})
+
     oauth_code = await session.get(OAuthCode, code)
     if not oauth_code:
         raise HTTPException(400, detail={"error": "invalid_grant", "error_description": "Code not found"})
@@ -177,13 +181,24 @@ async def token_exchange(
     now = datetime.now(timezone.utc)
     await session.execute(
         update(McpToken)
-        .where(McpToken.clerkUserId == clerk_user_id, McpToken.revokedAt.is_(None))
+        .where(
+            McpToken.clerkUserId == clerk_user_id,
+            McpToken.clientId == client_id,
+            McpToken.revokedAt.is_(None),
+        )
         .values(revokedAt=now)
     )
 
     jti = str(uuid.uuid4())
     access_token = mint_mcp_token(clerk_user_id, jti)
-    session.add(McpToken(clerkUserId=clerk_user_id, label="oauth", jti=jti))
+    session.add(
+        McpToken(
+            clerkUserId=clerk_user_id,
+            label=client.name or "oauth",
+            jti=jti,
+            clientId=client_id,
+        )
+    )
     await session.commit()
 
     return JSONResponse(
