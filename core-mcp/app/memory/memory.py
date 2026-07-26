@@ -2,7 +2,7 @@ import logging
 from datetime import datetime, timezone
 
 from ..infra import pg
-from . import embeddings, facts
+from . import embeddings, kg
 from .embeddings import embed
 
 logger = logging.getLogger("continuum.memory")
@@ -25,7 +25,8 @@ async def save(name: str, type: str, description: str, content: str, owner: str 
             """,
             owner, name, type, description, content, embedding, now, now,
         )
-    facts.schedule_extract(owner, name, f"{description}\n\n{content}")
+    combined = f"{description}\n\n{content}"
+    kg.schedule_extract(owner, name, combined, now.isoformat())
     return {"name": name, "type": type, "description": description, "updated_at": now.isoformat()}
 
 

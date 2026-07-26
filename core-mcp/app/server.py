@@ -9,7 +9,7 @@ from typing import Any
 from . import auth
 from .infra import browser_pool, db, pg
 from .infra import redis as redis_infra
-from .memory import facts, graph, memory
+from .memory import kg, memory, search
 import html2text
 import httpx
 import litellm
@@ -181,24 +181,28 @@ async def internal_memory(request: Request) -> Response:
     owner = auth.compose_owner(clerk_id, workspace)
 
     entries = await memory.list_full(owner)
-    owner_facts = await facts.list_by_owner(owner)
-    owner_entities = await graph.list_by_owner(owner)
-
-    facts_by_source: dict[str, list[dict]] = {}
-    for f in owner_facts:
-        facts_by_source.setdefault(f["source_name"], []).append(f)
-    entities_by_source: dict[str, list[dict]] = {}
-    for e in owner_entities:
-        entities_by_source.setdefault(e["source_name"], []).append(e)
-
-    for entry in entries:
-        entry["facts"] = facts_by_source.get(entry["name"], [])
-        entry["entities"] = entities_by_source.get(entry["name"], [])
 
     return JSONResponse({
         "workspace": workspace,
         "workspaces": await memory.list_workspaces(clerk_id),
         "entries": entries,
+    })
+
+
+@mcp.custom_route("/internal/graph", methods=["GET"])
+async def internal_graph(request: Request) -> Response:
+    if not _check_internal_secret(request):
+        return Response("Forbidden", status_code=403)
+    clerk_id = request.query_params.get("clerk_id", "")
+    workspace = request.query_params.get("workspace", "default")
+    owner = auth.compose_owner(clerk_id, workspace)
+
+    data = await kg.graph_for_owner(owner)
+    return JSONResponse({
+        "workspace": workspace,
+        "workspaces": await memory.list_workspaces(clerk_id),
+        "nodes": data["nodes"],
+        "edges": data["edges"],
     })
 
 
@@ -613,28 +617,34 @@ async def memory_search(query: str, top_k: int = 5, type: str | None = None, wor
 
 @mcp.tool
 async def memory_fact_search(query: str, top_k: int = 5, workspace: str = "default") -> str:
-    """Semantically search atomic facts extracted from saved memories — more precise than memory_search for narrow questions, since each fact is a single claim rather than a full memory blob. `workspace` scopes the search — defaults to "default"."""
+    """Semantically search facts in the knowledge graph — more precise than memory_search for narrow questions, since each fact is a single typed relationship between two entities rather than a full memory blob. Superseded (outdated) facts are excluded. `workspace` scopes the search — defaults to "default"."""
     owner = auth.scoped_owner(workspace)
-    results = await facts.search(owner, query, top_k=top_k)
+    results = await search.fact_search(owner, query, top_k=top_k)
     if not results:
         return "No facts found."
     return "\n".join(
-        f"- {r['content']} (from {r['source_name']}, score={r['score']:.3f})"
+        f"- {r['source']} {r['predicate']} {r['target']}: {r['fact']} (from {r['episode_name']})"
         for r in results
     )
 
 
 @mcp.tool
 async def memory_graph_search(entity: str, workspace: str = "default") -> str:
-    """Find memories connected to a named entity via the knowledge graph (people, orgs, places, dates, concepts, projects extracted from saved facts). `workspace` scopes the search — defaults to "default"."""
+    """Look up an entity in the knowledge graph and return everything currently known about it — its type, a summary, and all its live relationships to other entities. Best for "what do you know about X". Superseded facts are excluded. `workspace` scopes the search — defaults to "default"."""
     owner = auth.scoped_owner(workspace)
-    results = await graph.search(owner, entity)
-    if not results:
-        return "No graph entries found for that entity."
-    return "\n".join(
-        f"- {r['entity_display']} ({r['entity_type']}) {r['relation']} — from '{r['source_name']}': {r['fact_content']}"
-        for r in results
-    )
+    result = await search.graph_search(owner, entity)
+    if result is None:
+        return "No entity found matching that name."
+    node = result["node"]
+    lines = [f"{node['name']} ({node['type']})" + (f": {node['summary']}" if node["summary"] else "")]
+    if not result["edges"]:
+        lines.append("(no current relationships)")
+    for e in result["edges"]:
+        if e["outgoing"]:
+            lines.append(f"- {e['predicate']} → {e['target']}: {e['fact']} (from {e['episode_name']})")
+        else:
+            lines.append(f"- {e['source']} {e['predicate']} → (this): {e['fact']} (from {e['episode_name']})")
+    return "\n".join(lines)
 
 
 @mcp.tool
