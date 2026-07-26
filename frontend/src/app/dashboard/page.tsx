@@ -14,25 +14,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-interface Fact {
-  content: string;
-  valid_from: string;
-}
-
-interface Entity {
-  entity_display: string;
-  entity_type: string;
-  relation: string;
-}
-
 interface MemoryEntry {
   name: string;
   type: string;
   description: string;
   content: string;
   updated_at: string;
-  facts: Fact[];
-  entities: Entity[];
 }
 
 interface TokenMeta {
@@ -42,15 +29,6 @@ interface TokenMeta {
   revokedAt: string | null;
   lastUsedAt: string | null;
 }
-
-const ENTITY_TYPE_COLORS: Record<string, string> = {
-  person: "bg-blue-900/40 text-blue-300",
-  org: "bg-purple-900/40 text-purple-300",
-  place: "bg-green-900/40 text-green-300",
-  date: "bg-orange-900/40 text-orange-300",
-  concept: "bg-pink-900/40 text-pink-300",
-  project: "bg-cyan-900/40 text-cyan-300",
-};
 
 export default function DashboardPage() {
   const { workspace, setWorkspaces } = useWorkspace();
@@ -219,39 +197,6 @@ export default function DashboardPage() {
                           <p className="text-sm whitespace-pre-wrap">{e.content}</p>
                         </div>
 
-                        {e.facts.length > 0 && (
-                          <div>
-                            <h3 className="text-xs font-medium text-muted-foreground uppercase mb-1">Facts</h3>
-                            <ul className="list-disc list-inside space-y-1">
-                              {e.facts.map((f, i) => (
-                                <li key={i} className="text-sm">
-                                  {f.content}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-
-                        {e.entities.length > 0 && (
-                          <div>
-                            <h3 className="text-xs font-medium text-muted-foreground uppercase mb-1">Entities</h3>
-                            <div className="flex flex-wrap gap-1.5">
-                              {e.entities.map((ent, i) => (
-                                <span
-                                  key={i}
-                                  title={ent.relation}
-                                  className={`text-xs px-2 py-0.5 rounded ${
-                                    ENTITY_TYPE_COLORS[ent.entity_type] ?? "bg-muted text-muted-foreground"
-                                  }`}
-                                >
-                                  {ent.entity_display}
-                                  <span className="opacity-60"> · {ent.entity_type}</span>
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
                         <Button
                           variant="destructive"
                           size="sm"
@@ -274,7 +219,7 @@ export default function DashboardPage() {
           <DialogHeader>
             <DialogTitle>Delete memory?</DialogTitle>
             <DialogDescription>
-              Delete &quot;{pendingDelete}&quot;? This also removes its extracted facts and graph entities.
+              Delete &quot;{pendingDelete}&quot;? This also removes its graph edges.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
