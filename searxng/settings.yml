@@ -13,4 +13,7 @@ search:
 engines:
   - name: wikidata
     disabled: true
-
+  - name: ahmia
+    disabled: true
+  - name: torch
+    disabled: true

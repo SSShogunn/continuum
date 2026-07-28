@@ -1,6 +1,6 @@
 import os
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from . import taxonomy
 from .llm import structured
@@ -30,6 +30,16 @@ class Relation(BaseModel):
 class ExtractedGraph(BaseModel):
     entities: list[Entity]
     relations: list[Relation]
+
+    @field_validator("entities", mode="before")
+    @classmethod
+    def _coerce_bare_names(cls, v):
+        if not isinstance(v, list):
+            return v
+        return [
+            {"name": item, "type": "concept", "summary": ""} if isinstance(item, str) else item
+            for item in v
+        ]
 
 
 _WORKED_EXAMPLE = (
