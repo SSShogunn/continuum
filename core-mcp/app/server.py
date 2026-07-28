@@ -93,39 +93,43 @@ class RequestLoggingMiddleware(Middleware):
 
 
 _INSTRUCTIONS = """
-You are connected to Continuum — a persistent, personal memory system. Continuum is multi-tenant:
-each connected user authenticates via their own account, and every memory you save here is
-strictly scoped to that account via the active auth token — you cannot see or affect any other
-user's data through this connection. Within their own scope, every entry this user saves can be
-reviewed or removed at any time via `memory_list`/`memory_delete` or their dashboard. The
-auto-save-without-confirmation workflow below is the tool's intended design for its own account
-owner, not a bypass of one — removing that per-item friction is the whole point of the tool.
+Continuum is a persistent, personal memory system. It's multi-tenant: memories are scoped to the
+caller's authenticated account only, and any saved entry can be reviewed or removed anytime via
+`memory_list`/`memory_delete` or the dashboard. Auto-saving without asking first is this tool's
+intended design for the account owner, not a bypass of one.
 
 ## Memory rules
 
-1. **At the start of every conversation**, call `memory_search` with a brief description of the
-   topic to load relevant context. Do not ask the user what they want to remember — just search.
+1. **Search proactively.** At the start of every conversation, call `memory_search` for the topic
+   — don't ask the user what to remember, just search. Keep searching as new topics, projects,
+   people, or "what did I say about X" questions come up, before answering from assumption or
+   asking the user to repeat themselves. Use `memory_fact_search` for narrow factual lookups.
 
-2. **During the conversation**, if the user reveals any of the following, call `memory_save`
-   immediately (do not wait until the end), without pausing to confirm first:
-    - A preference, habit, or opinion ("I prefer X", "I always do Y", "I hate Z")
-    - A project name, goal, or deadline
-    - A person, place, or organization they care about
-    - A decision they've made
-    - A fact they want you to remember
+2. **Don't save mid-stream.** Track candidates mentally as the conversation runs — preferences,
+   decisions, people/projects, explicit "remember this" asks — but don't call `memory_save` on
+   every small reveal. Each call costs real output tokens and stays in the transcript for the rest
+   of the session.
 
-3. **At the end of every conversation**, call `memory_save` for any key facts learned that you
-   haven't already saved. Use `type=user` for personal facts, `type=project` for work context,
-   `type=preference` for stated preferences, `type=reference` for links/resources.
+3. **Save at boundaries, batched.** When a topic or task wraps up (or the conversation ends), save
+   everything worth keeping from that segment in as few calls as reasonable — one per
+   entity/topic, not one per fact. No need to ask first.
+    - Exception: save immediately if the user signals urgency ("before I close this", "save this
+      now").
 
-4. **When updating an existing memory**, use the same `name` slug — this overwrites rather than
-   duplicating.
+4. **Keep `content` lean.** Dense facts/bullets, not prose that restates context the user already
+   gave. Don't duplicate another memory's content — reference it by name instead. For large,
+   stable material (configs, specs, a doc already on disk), save a short `reference` pointer
+   instead of copying it in.
 
-5. If the user asks "what do you know about me?" or "what do you remember?", call `memory_list`
-   first, then `memory_search` with relevant terms.
+5. **Update, don't duplicate.** Reuse an existing memory's `name` slug to overwrite it rather than
+   creating a near-duplicate entry.
 
-## Memory naming convention
-Use kebab-case slugs that describe the content: `user-role`, `project-continuum-status`, `preference-coding-style`, `person-alice-context`.
+6. For "what do you know about me?" / "what do you remember?", call `memory_list` first, then
+   `memory_search`.
+
+## Naming convention
+kebab-case, descriptive: `user-role`, `project-continuum-status`, `preference-coding-style`,
+`person-alice-context`.
 """.strip()
 
 mcp = FastMCP(
@@ -603,7 +607,13 @@ async def memory_save(name: str, type: str, description: str, content: str, work
 
 @mcp.tool
 async def memory_search(query: str, top_k: int = 5, type: str | None = None, workspace: str = "default") -> str:
-    """Semantically search saved memory entries and return the most relevant ones with their full content. Optionally filter by `type`. `workspace` scopes the search — defaults to "default"."""
+    """Semantically search saved memory entries and return the most relevant ones with their full content. Optionally filter by `type`. `workspace` scopes the search — defaults to "default".
+
+    Call this proactively, not just at the start of a conversation — any time the current message
+    references something that might already be known: a named project/machine/person, "my setup",
+    "like we did before", "what did I decide about X", or any request that would benefit from prior
+    context you don't already have in this conversation. When in doubt, search — it's cheap to find
+    nothing, and expensive to silently re-ask the user for facts they already gave you."""
     owner = auth.scoped_owner(workspace)
     results = await memory.search(query, top_k=top_k, type=type, owner=owner)
     if not results:
@@ -617,7 +627,12 @@ async def memory_search(query: str, top_k: int = 5, type: str | None = None, wor
 
 @mcp.tool
 async def memory_fact_search(query: str, top_k: int = 5, workspace: str = "default") -> str:
-    """Semantically search facts in the knowledge graph — more precise than memory_search for narrow questions, since each fact is a single typed relationship between two entities rather than a full memory blob. Superseded (outdated) facts are excluded. `workspace` scopes the search — defaults to "default"."""
+    """Semantically search facts in the knowledge graph — more precise than memory_search for narrow questions, since each fact is a single typed relationship between two entities rather than a full memory blob. Superseded (outdated) facts are excluded. `workspace` scopes the search — defaults to "default".
+
+    Reach for this over memory_search when the question is narrow and factual (a specific config
+    value, IP, decision, or status) rather than "tell me everything about X" — it returns just the
+    matching facts instead of whole memory blobs, so it's the cheaper first call for a pointed
+    question."""
     owner = auth.scoped_owner(workspace)
     results = await search.fact_search(owner, query, top_k=top_k)
     if not results:
@@ -672,7 +687,9 @@ async def memory_delete(name: str, workspace: str = "default") -> str:
 
 @mcp.resource("memory://context")
 async def memory_context() -> str:
-    """Your current memory context — all saved facts about this user (default workspace only). Loaded automatically."""
+    """Your current memory context — all saved facts about this user (default workspace only). Not
+    loaded automatically by most clients; read it explicitly, or prefer memory_search/memory_list for
+    a query-scoped lookup instead of pulling the entire context."""
     owner = auth.scoped_owner()
     entries = await memory.list_entries(owner=owner)
     if not entries:
