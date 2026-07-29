@@ -122,10 +122,15 @@ intended design for the account owner, not a bypass of one.
    instead of copying it in.
 
 5. **Update, don't duplicate.** Reuse an existing memory's `name` slug to overwrite it rather than
-   creating a near-duplicate entry.
+   creating a near-duplicate entry. When new information replaces an *older, separately-named*
+   memory rather than just updating one in place, pass `supersedes=["old-name"]` on `memory_save`
+   instead of leaving the stale entry to keep competing in search results.
 
 6. For "what do you know about me?" / "what do you remember?", call `memory_list` first, then
    `memory_search`.
+
+7. If the user wants to organize memory by context (e.g. work vs. personal vs. a specific project),
+   call `memory_list_workspaces` to see what already exists before inventing a new workspace name.
 
 ## Naming convention
 kebab-case, descriptive: `user-role`, `project-continuum-status`, `preference-coding-style`,
@@ -598,10 +603,17 @@ async def verify_quote(url: str, quote: str, context_chars: int = 200) -> str:
 
 
 @mcp.tool
-async def memory_save(name: str, type: str, description: str, content: str, workspace: str = "default") -> str:
-    """Save or update a persistent memory entry (e.g. facts about the user, their preferences, or ongoing project context) so it can be recalled later across sessions via memory_search. `name` is a unique slug — saving again with the same name overwrites the existing entry. `type` categorizes the entry (e.g. user, preference, project, reference). `workspace` namespaces the entry (e.g. work, personal) — defaults to "default"."""
+async def memory_save(
+    name: str,
+    type: str,
+    description: str,
+    content: str,
+    workspace: str = "default",
+    supersedes: list[str] | None = None,
+) -> str:
+    """Save or update a persistent memory entry (e.g. facts about the user, their preferences, or ongoing project context) so it can be recalled later across sessions via memory_search. `name` is a unique slug — saving again with the same name overwrites the existing entry. `type` categorizes the entry (e.g. user, preference, project, reference). `workspace` namespaces the entry (e.g. work, personal) — defaults to "default". `supersedes` is a list of existing memory names that this entry replaces — they get archived (hidden from search/list, not deleted) instead of left to compete on similarity forever."""
     owner = auth.scoped_owner(workspace)
-    record = await memory.save(name, type, description, content, owner=owner)
+    record = await memory.save(name, type, description, content, owner=owner, supersedes=supersedes)
     return f"Saved memory '{record['name']}' (type={record['type']})."
 
 
@@ -663,14 +675,15 @@ async def memory_graph_search(entity: str, workspace: str = "default") -> str:
 
 
 @mcp.tool
-async def memory_list(type: str | None = None, workspace: str = "default") -> str:
-    """List all saved memory entries (name, type, description, last updated) without their full content. Optionally filter by `type`. `workspace` scopes the listing — defaults to "default"."""
+async def memory_list(type: str | None = None, workspace: str = "default", include_archived: bool = False) -> str:
+    """List all saved memory entries (name, type, description, last updated) without their full content. Optionally filter by `type`. `workspace` scopes the listing — defaults to "default". Set `include_archived=True` to also show entries archived via `supersedes` or `memory_archive`."""
     owner = auth.scoped_owner(workspace)
-    entries = await memory.list_entries(type=type, owner=owner)
+    entries = await memory.list_entries(type=type, owner=owner, include_archived=include_archived)
     if not entries:
         return "No memory entries found."
     return "\n".join(
         f"- {e['name']} [{e['type']}]: {e['description']} (updated {e['updated_at']})"
+        + (f" (archived {e['archived_at']})" if e.get("archived_at") else "")
         for e in entries
     )
 
@@ -683,6 +696,34 @@ async def memory_delete(name: str, workspace: str = "default") -> str:
     if not deleted:
         raise ToolError(f"No memory entry named '{name}' found.")
     return f"Deleted memory '{name}'."
+
+
+@mcp.tool
+async def memory_archive(name: str, workspace: str = "default") -> str:
+    """Archive a memory entry by name — hides it from memory_search and memory_list (default), without deleting it. Use memory_restore to undo. `workspace` scopes the lookup — defaults to "default"."""
+    owner = auth.scoped_owner(workspace)
+    archived = await memory.archive(name, owner=owner)
+    if not archived:
+        raise ToolError(f"No active memory entry named '{name}' found.")
+    return f"Archived memory '{name}'."
+
+
+@mcp.tool
+async def memory_restore(name: str, workspace: str = "default") -> str:
+    """Restore a previously archived memory entry by name, making it visible again in memory_search and memory_list. `workspace` scopes the lookup — defaults to "default"."""
+    owner = auth.scoped_owner(workspace)
+    restored = await memory.restore(name, owner=owner)
+    if not restored:
+        raise ToolError(f"No archived memory entry named '{name}' found.")
+    return f"Restored memory '{name}'."
+
+
+@mcp.tool
+async def memory_list_workspaces() -> str:
+    """List all workspaces that exist for the current account."""
+    clerk_id = auth.current_owner()
+    workspaces = await memory.list_workspaces(clerk_id)
+    return "\n".join(f"- {w}" for w in workspaces)
 
 
 @mcp.resource("memory://context")

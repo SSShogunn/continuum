@@ -1,4 +1,5 @@
 import logging
+import os
 from datetime import datetime, timezone
 
 from ..infra import pg
@@ -7,24 +8,41 @@ from .embeddings import embed
 
 logger = logging.getLogger("continuum.memory")
 
+HALF_LIFE_DAYS = float(os.environ.get("CONTINUUM_MEMORY_RECENCY_HALFLIFE_DAYS", "365"))
+RECENCY_FLOOR = float(os.environ.get("CONTINUUM_MEMORY_RECENCY_FLOOR", "0.7"))
 
-async def save(name: str, type: str, description: str, content: str, owner: str = "") -> dict:
+
+async def save(
+    name: str,
+    type: str,
+    description: str,
+    content: str,
+    owner: str = "",
+    supersedes: list[str] | None = None,
+) -> dict:
     embedding = await embed(f"{description}\n\n{content}")
     now = datetime.now(timezone.utc)
     async with pg.pool().acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO memory (owner, name, type, description, content, embedding, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            ON CONFLICT (owner, name) DO UPDATE SET
-                type        = EXCLUDED.type,
-                description = EXCLUDED.description,
-                content     = EXCLUDED.content,
-                embedding   = EXCLUDED.embedding,
-                updated_at  = EXCLUDED.updated_at
-            """,
-            owner, name, type, description, content, embedding, now, now,
-        )
+        async with conn.transaction():
+            await conn.execute(
+                """
+                INSERT INTO memory (owner, name, type, description, content, embedding, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                ON CONFLICT (owner, name) DO UPDATE SET
+                    type        = EXCLUDED.type,
+                    description = EXCLUDED.description,
+                    content     = EXCLUDED.content,
+                    embedding   = EXCLUDED.embedding,
+                    updated_at  = EXCLUDED.updated_at,
+                    archived_at = NULL
+                """,
+                owner, name, type, description, content, embedding, now, now,
+            )
+            if supersedes:
+                await conn.execute(
+                    "UPDATE memory SET archived_at = $1 WHERE owner = $2 AND name = ANY($3::text[])",
+                    now, owner, supersedes,
+                )
     combined = f"{description}\n\n{content}"
     kg.schedule_extract(owner, name, combined, now.isoformat())
     return {"name": name, "type": type, "description": description, "updated_at": now.isoformat()}
@@ -32,6 +50,7 @@ async def save(name: str, type: str, description: str, content: str, owner: str 
 
 async def search(query: str, top_k: int = 5, type: str | None = None, owner: str = "") -> list[dict]:
     query_embedding = await embed(query)
+    pool_size = top_k * 4
     async with pg.pool().acquire() as conn:
         if type:
             rows = await conn.fetch(
@@ -39,11 +58,11 @@ async def search(query: str, top_k: int = 5, type: str | None = None, owner: str
                 SELECT name, type, description, content, updated_at,
                        1 - (embedding <=> $1) AS score
                 FROM memory
-                WHERE owner = $2 AND type = $3
+                WHERE owner = $2 AND type = $3 AND archived_at IS NULL
                 ORDER BY embedding <=> $1
                 LIMIT $4
                 """,
-                query_embedding, owner, type, top_k,
+                query_embedding, owner, type, pool_size,
             )
         else:
             rows = await conn.fetch(
@@ -51,38 +70,51 @@ async def search(query: str, top_k: int = 5, type: str | None = None, owner: str
                 SELECT name, type, description, content, updated_at,
                        1 - (embedding <=> $1) AS score
                 FROM memory
-                WHERE owner = $2
+                WHERE owner = $2 AND archived_at IS NULL
                 ORDER BY embedding <=> $1
                 LIMIT $3
                 """,
-                query_embedding, owner, top_k,
+                query_embedding, owner, pool_size,
             )
 
-    return [
-        {
+    now = datetime.now(timezone.utc)
+    scored = []
+    for row in rows:
+        updated_at = row["updated_at"]
+        age_days = max((now - updated_at).total_seconds() / 86400, 0.0)
+        recency_factor = 0.5 ** (age_days / HALF_LIFE_DAYS)
+        final_score = row["score"] * (RECENCY_FLOOR + (1 - RECENCY_FLOOR) * recency_factor)
+        scored.append((final_score, row))
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    scored = scored[:top_k]
+
+    results = []
+    for final_score, row in scored:
+        updated_at = row["updated_at"]
+        results.append({
             "name": row["name"],
             "type": row["type"],
             "description": row["description"],
             "content": row["content"],
-            "score": row["score"],
-            "updated_at": row["updated_at"].isoformat() if hasattr(row["updated_at"], "isoformat") else row["updated_at"],
-        }
-        for row in rows
-    ]
+            "score": final_score,
+            "updated_at": updated_at.isoformat() if hasattr(updated_at, "isoformat") else updated_at,
+        })
+    return results
 
 
-async def list_entries(type: str | None = None, owner: str = "") -> list[dict]:
+async def list_entries(type: str | None = None, owner: str = "", include_archived: bool = False) -> list[dict]:
+    archived_clause = "" if include_archived else "AND archived_at IS NULL"
     async with pg.pool().acquire() as conn:
         if type:
             rows = await conn.fetch(
-                "SELECT name, type, description, updated_at FROM memory "
-                "WHERE owner = $1 AND type = $2 ORDER BY updated_at DESC",
+                f"SELECT name, type, description, updated_at, archived_at FROM memory "
+                f"WHERE owner = $1 AND type = $2 {archived_clause} ORDER BY updated_at DESC",
                 owner, type,
             )
         else:
             rows = await conn.fetch(
-                "SELECT name, type, description, updated_at FROM memory "
-                "WHERE owner = $1 ORDER BY updated_at DESC",
+                f"SELECT name, type, description, updated_at, archived_at FROM memory "
+                f"WHERE owner = $1 {archived_clause} ORDER BY updated_at DESC",
                 owner,
             )
     return [
@@ -91,9 +123,28 @@ async def list_entries(type: str | None = None, owner: str = "") -> list[dict]:
             "type": row["type"],
             "description": row["description"],
             "updated_at": row["updated_at"].isoformat() if hasattr(row["updated_at"], "isoformat") else row["updated_at"],
+            "archived_at": row["archived_at"].isoformat() if row["archived_at"] else None,
         }
         for row in rows
     ]
+
+
+async def archive(name: str, owner: str = "") -> bool:
+    async with pg.pool().acquire() as conn:
+        result = await conn.execute(
+            "UPDATE memory SET archived_at = $1 WHERE owner = $2 AND name = $3 AND archived_at IS NULL",
+            datetime.now(timezone.utc), owner, name,
+        )
+    return result != "UPDATE 0"
+
+
+async def restore(name: str, owner: str = "") -> bool:
+    async with pg.pool().acquire() as conn:
+        result = await conn.execute(
+            "UPDATE memory SET archived_at = NULL WHERE owner = $1 AND name = $2 AND archived_at IS NOT NULL",
+            owner, name,
+        )
+    return result != "UPDATE 0"
 
 
 async def list_full(owner: str = "") -> list[dict]:
