@@ -5,6 +5,7 @@ import os
 import re
 import signal
 import time
+from datetime import datetime, timezone
 from typing import Any
 from . import auth
 from .infra import browser_pool, db, pg
@@ -132,6 +133,9 @@ intended design for the account owner, not a bypass of one.
 7. If the user wants to organize memory by context (e.g. work vs. personal vs. a specific project),
    call `memory_list_workspaces` to see what already exists before inventing a new workspace name.
 
+8. If the user wants to back up, migrate, or move memories between workspaces/accounts/tools, use
+   `memory_export`/`memory_import` rather than manually re-saving each entry.
+
 ## Naming convention
 kebab-case, descriptive: `user-role`, `project-continuum-status`, `preference-coding-style`,
 `person-alice-context`.
@@ -223,6 +227,33 @@ async def internal_memory_delete(request: Request) -> Response:
     owner = auth.compose_owner(body.get("clerk_id", ""), body.get("workspace", "default"))
     deleted = await memory.delete(body["name"], owner=owner)
     return JSONResponse({"deleted": deleted})
+
+
+@mcp.custom_route("/internal/memory/import", methods=["POST"])
+async def internal_memory_import(request: Request) -> Response:
+    if not _check_internal_secret(request):
+        return Response("Forbidden", status_code=403)
+    body = await request.json()
+    owner = auth.compose_owner(body.get("clerk_id", ""), body.get("workspace", "default"))
+    raw_entries = body.get("memories", [])
+
+    imported = 0
+    skipped: list[str] = []
+    for i, entry in enumerate(raw_entries):
+        if not isinstance(entry, dict) or not entry.get("name") or not entry.get("content"):
+            skipped.append(entry.get("name") if isinstance(entry, dict) and entry.get("name") else f"#{i}")
+            continue
+        content = entry["content"]
+        await memory.save(
+            entry["name"],
+            entry.get("type") or "imported",
+            entry.get("description") or content[:200],
+            content,
+            owner=owner,
+        )
+        imported += 1
+
+    return JSONResponse({"imported": imported, "skipped": skipped})
 
 
 @mcp.custom_route("/internal/stats", methods=["GET"])
@@ -724,6 +755,71 @@ async def memory_list_workspaces() -> str:
     clerk_id = auth.current_owner()
     workspaces = await memory.list_workspaces(clerk_id)
     return "\n".join(f"- {w}" for w in workspaces)
+
+
+EXPORT_FORMAT = "continuum-memory-export"
+EXPORT_VERSION = "1"
+
+
+@mcp.tool
+async def memory_export(workspace: str = "default") -> str:
+    """Export every memory entry in a workspace (including archived ones) as a portable JSON
+    document, so it can be backed up or loaded into another tool. `workspace` scopes the export —
+    defaults to "default". Pair with `memory_import` to move memories between workspaces or
+    accounts."""
+    owner = auth.scoped_owner(workspace)
+    entries = await memory.list_full(owner=owner)
+    payload = {
+        "format": EXPORT_FORMAT,
+        "version": EXPORT_VERSION,
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "workspace": workspace,
+        "memories": entries,
+    }
+    return json.dumps(payload, indent=2)
+
+
+@mcp.tool
+async def memory_import(data: str, workspace: str = "default") -> str:
+    """Import memory entries from a JSON export into `workspace` (defaults to "default"). Accepts
+    Continuum's own export format (an object with a `memories` array, as produced by
+    `memory_export`) or a plain JSON array of objects with at least `name` and `content` — so
+    exports from other memory tools can be adapted with minimal reshaping. Entries reuse `name` as
+    the unique key, so importing overwrites an existing entry with the same name (and unarchives
+    it) rather than duplicating it."""
+    owner = auth.scoped_owner(workspace)
+    try:
+        parsed = json.loads(data)
+    except json.JSONDecodeError as exc:
+        raise ToolError(f"Invalid JSON: {exc}")
+
+    if isinstance(parsed, dict) and isinstance(parsed.get("memories"), list):
+        raw_entries = parsed["memories"]
+    elif isinstance(parsed, list):
+        raw_entries = parsed
+    else:
+        raise ToolError("Expected a JSON array of memories, or an object with a 'memories' array.")
+
+    imported = 0
+    skipped: list[str] = []
+    for i, entry in enumerate(raw_entries):
+        if not isinstance(entry, dict) or not entry.get("name") or not entry.get("content"):
+            skipped.append(entry.get("name") if isinstance(entry, dict) and entry.get("name") else f"#{i}")
+            continue
+        content = entry["content"]
+        await memory.save(
+            entry["name"],
+            entry.get("type") or "imported",
+            entry.get("description") or content[:200],
+            content,
+            owner=owner,
+        )
+        imported += 1
+
+    summary = f"Imported {imported} memory entr{'y' if imported == 1 else 'ies'} into workspace '{workspace}'."
+    if skipped:
+        summary += f" Skipped {len(skipped)} invalid entries (missing name/content): {', '.join(skipped[:10])}"
+    return summary
 
 
 @mcp.resource("memory://context")

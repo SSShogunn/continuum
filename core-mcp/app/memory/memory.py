@@ -150,7 +150,7 @@ async def restore(name: str, owner: str = "") -> bool:
 async def list_full(owner: str = "") -> list[dict]:
     async with pg.pool().acquire() as conn:
         rows = await conn.fetch(
-            "SELECT name, type, description, content, updated_at FROM memory "
+            "SELECT name, type, description, content, created_at, updated_at, archived_at FROM memory "
             "WHERE owner = $1 ORDER BY updated_at DESC",
             owner,
         )
@@ -160,7 +160,9 @@ async def list_full(owner: str = "") -> list[dict]:
             "type": row["type"],
             "description": row["description"],
             "content": row["content"],
+            "created_at": row["created_at"].isoformat() if hasattr(row["created_at"], "isoformat") else row["created_at"],
             "updated_at": row["updated_at"].isoformat() if hasattr(row["updated_at"], "isoformat") else row["updated_at"],
+            "archived_at": row["archived_at"].isoformat() if row["archived_at"] else None,
         }
         for row in rows
     ]

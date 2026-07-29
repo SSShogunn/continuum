@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useWorkspace } from "@/lib/workspace-context";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -19,7 +19,9 @@ interface MemoryEntry {
   type: string;
   description: string;
   content: string;
+  created_at?: string;
   updated_at: string;
+  archived_at?: string | null;
 }
 
 interface TokenMeta {
@@ -41,6 +43,9 @@ export default function DashboardPage() {
   const [minting, setMinting] = useState(false);
   const [mintError, setMintError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importMessage, setImportMessage] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const loading = loadedWorkspace !== workspace;
 
@@ -108,6 +113,56 @@ export default function DashboardPage() {
     }
   }
 
+  function exportMemory() {
+    const payload = {
+      format: "continuum-memory-export",
+      version: "1",
+      exported_at: new Date().toISOString(),
+      workspace,
+      memories: memory,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `continuum-memory-${workspace}-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    setImportMessage(null);
+    try {
+      const parsed = JSON.parse(await file.text());
+      const memories = Array.isArray(parsed) ? parsed : parsed.memories;
+      if (!Array.isArray(memories)) {
+        throw new Error("Expected a JSON array of memories, or an object with a 'memories' array.");
+      }
+      const res = await fetch(`/api/memory/import?workspace=${encodeURIComponent(workspace)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ memories }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail ?? "Import failed");
+      const skippedCount = data.skipped?.length ?? 0;
+      setImportMessage(
+        `Imported ${data.imported} entr${data.imported === 1 ? "y" : "ies"}.` +
+          (skippedCount ? ` Skipped ${skippedCount}.` : "")
+      );
+      const refreshed = await fetch(`/api/memory?workspace=${encodeURIComponent(workspace)}`).then((r) => r.json());
+      setMemory(refreshed.entries ?? []);
+    } catch (err) {
+      setImportMessage(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
   async function copy() {
     if (!newToken) return;
     await navigator.clipboard.writeText(newToken);
@@ -161,7 +216,32 @@ export default function DashboardPage() {
 
         {/* Memory */}
         <section>
-          <h2 className="text-xl font-semibold mb-4">Memory</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold">Memory</h2>
+            <div className="flex items-center gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/json"
+                className="hidden"
+                onChange={handleImportFile}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={importing}
+              >
+                {importing ? "Importing…" : "Import"}
+              </Button>
+              <Button variant="outline" size="sm" onClick={exportMemory} disabled={memory.length === 0}>
+                Export
+              </Button>
+            </div>
+          </div>
+          {importMessage && (
+            <p className="text-xs text-muted-foreground mb-3">{importMessage}</p>
+          )}
 
           {loading ? (
             <p className="text-muted-foreground text-sm">Loading…</p>
