@@ -168,6 +168,25 @@ async def list_full(owner: str = "") -> list[dict]:
     ]
 
 
+async def list_by_names(names: list[str], owner: str = "") -> list[dict]:
+    async with pg.pool().acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT name, type, description, content, updated_at FROM memory "
+            "WHERE owner = $1 AND name = ANY($2::text[]) ORDER BY updated_at DESC",
+            owner, names,
+        )
+    return [
+        {
+            "name": row["name"],
+            "type": row["type"],
+            "description": row["description"],
+            "content": row["content"],
+            "updated_at": row["updated_at"].isoformat() if hasattr(row["updated_at"], "isoformat") else row["updated_at"],
+        }
+        for row in rows
+    ]
+
+
 async def list_workspaces(clerk_id: str) -> list[str]:
     async with pg.pool().acquire() as conn:
         rows = await conn.fetch(
@@ -187,6 +206,12 @@ async def delete(name: str, owner: str = "") -> bool:
             owner, name,
         )
     return result != "DELETE 0"
+
+
+async def delete_workspace(owner: str = "") -> int:
+    async with pg.pool().acquire() as conn:
+        result = await conn.execute("DELETE FROM memory WHERE owner = $1", owner)
+    return int(result.split()[-1])
 
 
 async def start() -> None:

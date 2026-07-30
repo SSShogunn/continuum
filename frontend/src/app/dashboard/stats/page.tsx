@@ -122,8 +122,8 @@ export default function StatsPage() {
                       itemStyle={TOOLTIP_ITEM_STYLE}
                       labelStyle={TOOLTIP_LABEL_STYLE}
                     />
-                    <Line type="monotone" dataKey="calls" stroke="#22d3ee" strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="errors" stroke="#f87171" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="calls" stroke="var(--chart-1)" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="errors" stroke="var(--chart-2)" strokeWidth={2} dot={false} />
                   </LineChart>
                 </ResponsiveContainer>
               </CardContent>
@@ -144,7 +144,7 @@ export default function StatsPage() {
                       itemStyle={TOOLTIP_ITEM_STYLE}
                       labelStyle={TOOLTIP_LABEL_STYLE}
                     />
-                    <Bar dataKey="calls" fill="#a78bfa" radius={[0, 4, 4, 0]} />
+                    <Bar dataKey="calls" fill="var(--chart-3)" radius={[0, 4, 4, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </CardContent>

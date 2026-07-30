@@ -98,6 +98,13 @@ async def extract(owner: str, name: str, text: str, reference_time_iso: str) -> 
     )
 
 
+async def delete_workspace(owner: str) -> None:
+    async with pg.pool().acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("DELETE FROM entity_edge WHERE owner = $1", owner)
+            await conn.execute("DELETE FROM entity_node WHERE owner = $1", owner)
+
+
 async def graph_for_owner(owner: str) -> dict:
     async with pg.pool().acquire() as conn:
         edge_rows = await conn.fetch(

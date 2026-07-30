@@ -1,5 +1,6 @@
 "use client";
 
+import { useSyncExternalStore } from "react";
 import { Check, Monitor, Moon, Sun } from "lucide-react";
 import {
   DropdownMenu,
@@ -15,9 +16,23 @@ const OPTIONS = [
   { value: "system" as const, label: "System", icon: Monitor },
 ];
 
+function subscribeNever() {
+  return () => {};
+}
+
+// True once hydrated on the client, false during SSR/the first client render —
+// avoids a theme-dependent icon mismatching between server and client markup.
+function useHasMounted() {
+  return useSyncExternalStore(subscribeNever, () => true, () => false);
+}
+
 export function ThemeToggle() {
   const { theme, resolvedTheme, setTheme } = useTheme();
-  const ActiveIcon = OPTIONS.find((o) => o.value === theme)?.icon ?? (resolvedTheme === "dark" ? Moon : Sun);
+  const mounted = useHasMounted();
+
+  const ActiveIcon = !mounted
+    ? Sun
+    : OPTIONS.find((o) => o.value === theme)?.icon ?? (resolvedTheme === "dark" ? Moon : Sun);
 
   return (
     <DropdownMenu>

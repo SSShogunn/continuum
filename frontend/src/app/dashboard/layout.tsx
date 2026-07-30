@@ -1,16 +1,22 @@
-import { AppHeader } from "@/components/app-header";
-import { WorkspaceSwitcher } from "@/components/workspace-switcher";
+import { DashboardSidebar } from "@/components/dashboard-sidebar";
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { WorkspaceProvider } from "@/lib/workspace-context";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
     <WorkspaceProvider>
-      <div className="min-h-screen">
-        <AppHeader>
-          <WorkspaceSwitcher />
-        </AppHeader>
-        {children}
-      </div>
+      <TooltipProvider>
+        <SidebarProvider>
+          <DashboardSidebar />
+          <SidebarInset>
+            <header className="sticky top-0 z-40 flex items-center gap-2 border-b bg-background/80 backdrop-blur px-4 py-2.5 supports-backdrop-filter:bg-background/60">
+              <SidebarTrigger />
+            </header>
+            {children}
+          </SidebarInset>
+        </SidebarProvider>
+      </TooltipProvider>
     </WorkspaceProvider>
   );
 }

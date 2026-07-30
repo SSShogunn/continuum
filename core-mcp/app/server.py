@@ -10,7 +10,7 @@ from typing import Any
 from . import auth
 from .infra import browser_pool, db, pg
 from .infra import redis as redis_infra
-from .memory import kg, memory, search
+from .memory import kg, memory, prompt, search
 import html2text
 import httpx
 import litellm
@@ -219,6 +219,26 @@ async def internal_graph(request: Request) -> Response:
     })
 
 
+@mcp.custom_route("/internal/prompt", methods=["POST"])
+async def internal_prompt(request: Request) -> Response:
+    if not _check_internal_secret(request):
+        return Response("Forbidden", status_code=403)
+    body = await request.json()
+    owner = auth.compose_owner(body.get("clerk_id", ""), body.get("workspace", "default"))
+    mode = body.get("mode")
+    if mode == "all":
+        text = await prompt.build_full(owner)
+    elif mode == "search":
+        text = await prompt.build_search(owner, body.get("query", ""))
+    elif mode == "select":
+        text = await prompt.build_selection(owner, body.get("names", []))
+    elif mode == "entity":
+        text = await prompt.build_entity(owner, body.get("entity", ""))
+    else:
+        return Response("Invalid mode", status_code=400)
+    return JSONResponse({"prompt": text})
+
+
 @mcp.custom_route("/internal/memory/delete", methods=["POST"])
 async def internal_memory_delete(request: Request) -> Response:
     if not _check_internal_secret(request):
@@ -254,6 +274,20 @@ async def internal_memory_import(request: Request) -> Response:
         imported += 1
 
     return JSONResponse({"imported": imported, "skipped": skipped})
+
+
+@mcp.custom_route("/internal/memory/delete-workspace", methods=["POST"])
+async def internal_memory_delete_workspace(request: Request) -> Response:
+    if not _check_internal_secret(request):
+        return Response("Forbidden", status_code=403)
+    body = await request.json()
+    workspace = body.get("workspace", "default")
+    if workspace == "default":
+        return Response("Cannot delete the default workspace", status_code=400)
+    owner = auth.compose_owner(body.get("clerk_id", ""), workspace)
+    deleted = await memory.delete_workspace(owner)
+    await kg.delete_workspace(owner)
+    return JSONResponse({"deleted": deleted})
 
 
 @mcp.custom_route("/internal/stats", methods=["GET"])

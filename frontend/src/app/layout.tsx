@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import { ClerkProvider } from "@clerk/nextjs";
 import { ThemeProvider } from "@/lib/theme-context";
 import "./globals.css";
@@ -26,7 +27,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <ClerkProvider>
       <html lang="en" className="h-full antialiased" suppressHydrationWarning>
         <body className="min-h-full">
-          <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+          <Script id="theme-init" strategy="beforeInteractive">{THEME_INIT_SCRIPT}</Script>
           <ThemeProvider>{children}</ThemeProvider>
         </body>
       </html>

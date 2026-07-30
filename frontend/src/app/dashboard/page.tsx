@@ -1,9 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useWorkspace } from "@/lib/workspace-context";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -24,36 +25,17 @@ interface MemoryEntry {
   archived_at?: string | null;
 }
 
-interface TokenMeta {
-  id: string;
-  label: string;
-  createdAt: string;
-  revokedAt: string | null;
-  lastUsedAt: string | null;
-}
-
 export default function DashboardPage() {
   const { workspace, setWorkspaces } = useWorkspace();
   const [memory, setMemory] = useState<MemoryEntry[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [tokens, setTokens] = useState<TokenMeta[]>([]);
-  const [newToken, setNewToken] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
   const [loadedWorkspace, setLoadedWorkspace] = useState<string | null>(null);
-  const [minting, setMinting] = useState(false);
-  const [mintError, setMintError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const loading = loadedWorkspace !== workspace;
-
-  useEffect(() => {
-    fetch("/api/tokens")
-      .then((r) => r.json())
-      .then(setTokens);
-  }, []);
 
   useEffect(() => {
     fetch(`/api/memory?workspace=${encodeURIComponent(workspace)}`)
@@ -83,33 +65,6 @@ export default function DashboardPage() {
     });
     if (res.ok) {
       setMemory((prev) => prev.filter((e) => e.name !== name));
-    }
-  }
-
-  async function mintToken() {
-    setMinting(true);
-    setMintError(null);
-    try {
-      const res = await fetch("/api/tokens", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ label: "default" }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setMintError(`Error ${res.status}: ${data.detail ?? JSON.stringify(data)}`);
-        return;
-      }
-      setNewToken(data.token);
-      setTokens((prev) =>
-        ([{ id: data.id, label: data.label, createdAt: data.createdAt, revokedAt: null, lastUsedAt: null }] as TokenMeta[]).concat(
-          prev.map((t) => ({ ...t, revokedAt: t.revokedAt ?? new Date().toISOString() }))
-        )
-      );
-    } catch (e) {
-      setMintError(String(e));
-    } finally {
-      setMinting(false);
     }
   }
 
@@ -163,60 +118,11 @@ export default function DashboardPage() {
     }
   }
 
-  async function copy() {
-    if (!newToken) return;
-    await navigator.clipboard.writeText(newToken);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }
-
-  const activeToken = tokens.find((t) => !t.revokedAt);
-
   return (
     <>
-      <main className="max-w-3xl mx-auto px-6 py-10 space-y-12">
-        {/* MCP Token */}
+      <main className="max-w-3xl mx-auto px-6 py-10 space-y-6">
         <section>
-          <h2 className="text-xl font-semibold mb-4">MCP Token</h2>
-          {newToken ? (
-            <Card className="border-yellow-700 bg-yellow-900/20">
-              <CardContent className="space-y-3">
-                <p className="text-yellow-300 text-sm font-medium">
-                  Copy this token now — it will not be shown again.
-                </p>
-                <code className="block text-xs break-all bg-black/30 rounded p-3 font-mono">
-                  {newToken}
-                </code>
-                <Button onClick={copy} className="bg-yellow-600 hover:bg-yellow-500 text-white">
-                  {copied ? "Copied!" : "Copy to clipboard"}
-                </Button>
-              </CardContent>
-            </Card>
-          ) : (
-            <Card>
-              <CardContent className="space-y-3">
-                {activeToken ? (
-                  <p className="text-sm text-muted-foreground">
-                    Active token: <span className="text-foreground">{activeToken.label}</span>{" "}
-                    — created {new Date(activeToken.createdAt).toLocaleDateString()}
-                  </p>
-                ) : (
-                  <p className="text-sm text-muted-foreground">No active token. Generate one to use Continuum with MCP clients.</p>
-                )}
-                <Button onClick={mintToken} disabled={minting}>
-                  {minting ? "Generating…" : activeToken ? "Rotate token" : "Generate token"}
-                </Button>
-                {mintError && (
-                  <p className="text-destructive text-xs mt-2 font-mono">{mintError}</p>
-                )}
-              </CardContent>
-            </Card>
-          )}
-        </section>
-
-        {/* Memory */}
-        <section>
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-1">
             <h2 className="text-xl font-semibold">Memory</h2>
             <div className="flex items-center gap-2">
               <input
@@ -239,10 +145,14 @@ export default function DashboardPage() {
               </Button>
             </div>
           </div>
+          <Link href="/dashboard/settings?tab=tokens" className="text-muted-foreground text-xs hover:text-foreground transition-colors">
+            Manage your MCP token in Settings →
+          </Link>
           {importMessage && (
-            <p className="text-xs text-muted-foreground mb-3">{importMessage}</p>
+            <p className="text-xs text-muted-foreground mt-3">{importMessage}</p>
           )}
 
+          <div className="mt-4">
           {loading ? (
             <p className="text-muted-foreground text-sm">Loading…</p>
           ) : memory.length === 0 ? (
@@ -291,6 +201,7 @@ export default function DashboardPage() {
               })}
             </div>
           )}
+          </div>
         </section>
       </main>
 

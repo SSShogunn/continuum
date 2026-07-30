@@ -59,6 +59,36 @@ async def import_memory(
     return resp.json()
 
 
+@router.post("/prompt")
+async def generate_prompt(body: dict, user: dict = Depends(get_current_user)):
+    url = f"{settings.CONTINUUM_CORE_BASE_URL}/internal/prompt"
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            url,
+            json={**body, "clerk_id": user["sub"]},
+            headers={"X-Internal-Secret": settings.CONTINUUM_INTERNAL_SECRET},
+            timeout=15.0,
+        )
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail="Failed to generate prompt")
+    return resp.json()
+
+
+@router.post("/delete-workspace")
+async def delete_workspace(body: dict, user: dict = Depends(get_current_user)):
+    url = f"{settings.CONTINUUM_CORE_BASE_URL}/internal/memory/delete-workspace"
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            url,
+            json={**body, "clerk_id": user["sub"]},
+            headers={"X-Internal-Secret": settings.CONTINUUM_INTERNAL_SECRET},
+            timeout=15.0,
+        )
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail="Failed to delete workspace")
+    return resp.json()
+
+
 @router.delete("/{name}")
 async def delete_memory(
     name: str, workspace: str = "default", user: dict = Depends(get_current_user)
