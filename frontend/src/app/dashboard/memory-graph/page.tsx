@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import dynamic from "next/dynamic";
 import type {
   GraphCanvasRef,
@@ -262,29 +263,39 @@ export default function MemoryGraphPage() {
           </CardContent>
         </Card>
 
-        {selected && (
-          <Card className="w-80 shrink-0 overflow-y-auto">
-            <CardContent className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="font-medium text-sm">{selected.label}</h3>
-                <Badge variant="secondary">{selected.data.type}</Badge>
-              </div>
-              {selected.data.summary && (
-                <p className="text-sm text-muted-foreground">{selected.data.summary}</p>
-              )}
-              <ul className="space-y-2">
-                {selected.data.connections.map((c, i) => (
-                  <li key={i} className="text-sm">
-                    <span className="font-medium">
-                      {c.outgoing ? `${c.predicate} → ${c.other}` : `${c.other} ${c.predicate} →`}
-                    </span>
-                    <p className="text-xs text-muted-foreground">{c.fact}</p>
-                  </li>
-                ))}
-              </ul>
-            </CardContent>
-          </Card>
-        )}
+        <AnimatePresence>
+          {selected && (
+            <motion.div
+              initial={{ opacity: 0, x: 8 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 8 }}
+              transition={{ duration: 0.15, ease: "easeOut" }}
+              className="w-80 shrink-0"
+            >
+              <Card className="overflow-y-auto h-full">
+                <CardContent className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-medium text-sm">{selected.label}</h3>
+                    <Badge variant="secondary">{selected.data.type}</Badge>
+                  </div>
+                  {selected.data.summary && (
+                    <p className="text-sm text-muted-foreground">{selected.data.summary}</p>
+                  )}
+                  <ul className="space-y-2">
+                    {selected.data.connections.map((c, i) => (
+                      <li key={i} className="text-sm">
+                        <span className="font-medium">
+                          {c.outgoing ? `${c.predicate} → ${c.other}` : `${c.other} ${c.predicate} →`}
+                        </span>
+                        <p className="text-xs text-muted-foreground">{c.fact}</p>
+                      </li>
+                    ))}
+                  </ul>
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </main>
   );

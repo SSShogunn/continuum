@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useUser, UserButton } from "@clerk/nextjs";
+import dynamic from "next/dynamic";
+import { useUser } from "@clerk/nextjs";
+import { motion } from "motion/react";
 import {
   Database,
   Share2,
@@ -29,12 +31,17 @@ import {
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { ThemeToggle } from "@/components/theme-toggle";
 
+const UserButton = dynamic(() => import("@clerk/nextjs").then((m) => m.UserButton), {
+  ssr: false,
+  loading: () => <div className="size-7 rounded-full bg-muted shrink-0" />,
+});
+
 const NAV_LINKS = [
-  { href: "/dashboard", label: "Memory", icon: Database },
+  { href: "/dashboard", label: "Stats", icon: BarChart3 },
+  { href: "/dashboard/memory", label: "Memory", icon: Database },
   { href: "/dashboard/memory-graph", label: "Graph", icon: Share2 },
   { href: "/dashboard/export", label: "Export", icon: FileOutput },
   { href: "/dashboard/playground", label: "Playground", icon: PlayCircle },
-  { href: "/dashboard/stats", label: "Stats", icon: BarChart3 },
   { href: "/dashboard/connections", label: "Connections", icon: Plug },
   { href: "/dashboard/admin", label: "Admin", icon: ShieldCheck },
 ];
@@ -68,10 +75,18 @@ export function DashboardSidebar() {
                     <SidebarMenuButton
                       isActive={active}
                       tooltip={link.label}
+                      className="relative data-active:bg-transparent"
                       render={
                         <Link href={link.href}>
-                          <link.icon />
-                          <span>{link.label}</span>
+                          {active && (
+                            <motion.span
+                              layoutId="sidebar-active-pill"
+                              className="absolute inset-0 rounded-md bg-sidebar-accent"
+                              transition={{ duration: 0.15, ease: "easeOut" }}
+                            />
+                          )}
+                          <link.icon className="relative" />
+                          <span className="relative">{link.label}</span>
                         </Link>
                       }
                     />

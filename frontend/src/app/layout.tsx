@@ -27,7 +27,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <ClerkProvider>
       <html lang="en" className="h-full antialiased" suppressHydrationWarning>
         <body className="min-h-full">
-          <Script id="theme-init" strategy="beforeInteractive">{THEME_INIT_SCRIPT}</Script>
+          <Script id="theme-init" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
           <ThemeProvider>{children}</ThemeProvider>
         </body>
       </html>
