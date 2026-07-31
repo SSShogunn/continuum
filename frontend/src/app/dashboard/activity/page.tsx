@@ -76,7 +76,7 @@ export default function ActivityPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Select value={toolFilter} onValueChange={setToolFilter}>
+          <Select value={toolFilter} onValueChange={(v) => setToolFilter(v ?? "all")}>
             <SelectTrigger className="h-8 w-40 text-xs">
               <SelectValue placeholder="Tool" />
             </SelectTrigger>
@@ -89,7 +89,7 @@ export default function ActivityPage() {
               ))}
             </SelectContent>
           </Select>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v ?? "all")}>
             <SelectTrigger className="h-8 w-32 text-xs">
               <SelectValue placeholder="Status" />
             </SelectTrigger>
