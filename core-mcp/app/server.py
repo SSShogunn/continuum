@@ -94,17 +94,25 @@ class RequestLoggingMiddleware(Middleware):
 
 
 _INSTRUCTIONS = """
-Continuum is a persistent, personal memory system. It's multi-tenant: memories are scoped to the
-caller's authenticated account only, and any saved entry can be reviewed or removed anytime via
-`memory_list`/`memory_delete` or the dashboard. Auto-saving without asking first is this tool's
-intended design for the account owner, not a bypass of one.
+CRITICAL — Memory-First Protocol: Continuum is this user's persistent, personal memory. Before
+answering ANY substantive message — including the very first message of a new conversation — call
+`memory_search` (or `memory_list` for a broad "what do you know about me" ask) for the current
+topic. Do this unprompted; never ask the user whether to check memory, and never answer from
+assumption or ask the user to repeat context first when a search could surface it. This is the
+single most important behavior this server exists to enable — treat it as a hard requirement, not
+a suggestion.
+
+Continuum is multi-tenant: memories are scoped to the caller's authenticated account only, and any
+saved entry can be reviewed or removed anytime via `memory_list`/`memory_delete` or the dashboard.
+Auto-saving without asking first is this tool's intended design for the account owner, not a
+bypass of one.
 
 ## Memory rules
 
-1. **Search proactively.** At the start of every conversation, call `memory_search` for the topic
-   — don't ask the user what to remember, just search. Keep searching as new topics, projects,
-   people, or "what did I say about X" questions come up, before answering from assumption or
-   asking the user to repeat themselves. Use `memory_fact_search` for narrow factual lookups.
+1. **Search proactively, every conversation, every new topic.** At the start of every conversation
+   — before the first substantive reply — call `memory_search` for the topic. Keep searching as
+   new topics, projects, people, or "what did I say about X" questions come up. Use
+   `memory_fact_search` for narrow factual lookups.
 
 2. **Don't save mid-stream.** Track candidates mentally as the conversation runs — preferences,
    decisions, people/projects, explicit "remember this" asks — but don't call `memory_save` on
@@ -297,6 +305,48 @@ async def internal_stats(request: Request) -> Response:
     clerk_id = request.query_params.get("clerk_id") or None
     stats = await db.get_stats(owner=clerk_id)
     stats["timeseries"] = await db.get_timeseries(owner=clerk_id)
+    stats["latency_percentiles"] = await db.get_latency_percentiles(owner=clerk_id)
+    return JSONResponse(stats)
+
+
+@mcp.custom_route("/internal/stats/heatmap", methods=["GET"])
+async def internal_stats_heatmap(request: Request) -> Response:
+    if not _check_internal_secret(request):
+        return Response("Forbidden", status_code=403)
+    clerk_id = request.query_params.get("clerk_id") or None
+    heatmap = await db.get_hourly_heatmap(owner=clerk_id)
+    return JSONResponse({"heatmap": heatmap})
+
+
+@mcp.custom_route("/internal/activity", methods=["GET"])
+async def internal_activity(request: Request) -> Response:
+    if not _check_internal_secret(request):
+        return Response("Forbidden", status_code=403)
+    clerk_id = request.query_params.get("clerk_id") or None
+    limit = int(request.query_params.get("limit", "50"))
+    tool = request.query_params.get("tool") or None
+    status = request.query_params.get("status") or None
+    activity = await db.get_recent_activity(owner=clerk_id, limit=limit, tool=tool, status=status)
+    return JSONResponse({"activity": activity})
+
+
+@mcp.custom_route("/internal/memory/stats", methods=["GET"])
+async def internal_memory_stats(request: Request) -> Response:
+    if not _check_internal_secret(request):
+        return Response("Forbidden", status_code=403)
+    clerk_id = request.query_params.get("clerk_id", "")
+    stats = await memory.get_memory_stats(clerk_id)
+    return JSONResponse(stats)
+
+
+@mcp.custom_route("/internal/graph/stats", methods=["GET"])
+async def internal_graph_stats(request: Request) -> Response:
+    if not _check_internal_secret(request):
+        return Response("Forbidden", status_code=403)
+    clerk_id = request.query_params.get("clerk_id", "")
+    workspace = request.query_params.get("workspace", "default")
+    owner = auth.compose_owner(clerk_id, workspace)
+    stats = await kg.get_graph_stats(owner)
     return JSONResponse(stats)
 
 

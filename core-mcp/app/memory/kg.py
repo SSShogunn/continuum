@@ -98,6 +98,69 @@ async def extract(owner: str, name: str, text: str, reference_time_iso: str) -> 
     )
 
 
+async def get_graph_stats(owner: str) -> dict:
+    async with pg.pool().acquire() as conn:
+        node_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM entity_node WHERE owner = $1", owner
+        )
+        edge_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM entity_edge WHERE owner = $1 AND expired_at IS NULL",
+            owner,
+        )
+        by_type = await conn.fetch(
+            """
+            SELECT type, COUNT(*) AS count
+            FROM entity_node
+            WHERE owner = $1
+            GROUP BY type
+            ORDER BY count DESC
+            """,
+            owner,
+        )
+        top_entities = await conn.fetch(
+            """
+            SELECT n.name, n.type, COUNT(*) AS degree
+            FROM entity_node n
+            JOIN entity_edge e ON (e.source_id = n.id OR e.target_id = n.id)
+            WHERE n.owner = $1 AND e.expired_at IS NULL
+            GROUP BY n.id, n.name, n.type
+            ORDER BY degree DESC
+            LIMIT 10
+            """,
+            owner,
+        )
+        superseded = await conn.fetch(
+            """
+            SELECT e.fact, e.predicate, e.episode_name, e.valid_at, e.invalid_at, e.expired_at
+            FROM entity_edge e
+            WHERE e.owner = $1 AND e.expired_at IS NOT NULL
+            ORDER BY e.expired_at DESC
+            LIMIT 20
+            """,
+            owner,
+        )
+    return {
+        "node_count": node_count,
+        "edge_count": edge_count,
+        "by_type": [{"type": r["type"], "count": r["count"]} for r in by_type],
+        "top_entities": [
+            {"name": r["name"], "type": r["type"], "degree": r["degree"]}
+            for r in top_entities
+        ],
+        "superseded_facts": [
+            {
+                "fact": r["fact"],
+                "predicate": r["predicate"],
+                "episode_name": r["episode_name"],
+                "valid_at": r["valid_at"].isoformat() if r["valid_at"] else None,
+                "invalid_at": r["invalid_at"].isoformat() if r["invalid_at"] else None,
+                "expired_at": r["expired_at"].isoformat() if r["expired_at"] else None,
+            }
+            for r in superseded
+        ],
+    }
+
+
 async def delete_workspace(owner: str) -> None:
     async with pg.pool().acquire() as conn:
         async with conn.transaction():

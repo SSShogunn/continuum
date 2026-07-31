@@ -27,6 +27,36 @@ async def get_memory(workspace: str = "default", user: dict = Depends(get_curren
     return resp.json()
 
 
+@router.get("/stats")
+async def get_memory_stats(user: dict = Depends(get_current_user)):
+    url = f"{settings.CONTINUUM_CORE_BASE_URL}/internal/memory/stats"
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            url,
+            params={"clerk_id": user["sub"]},
+            headers={"X-Internal-Secret": settings.CONTINUUM_INTERNAL_SECRET},
+            timeout=10.0,
+        )
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail="Failed to fetch memory stats from core")
+    return resp.json()
+
+
+@router.get("/graph/stats")
+async def get_graph_stats(workspace: str = "default", user: dict = Depends(get_current_user)):
+    url = f"{settings.CONTINUUM_CORE_BASE_URL}/internal/graph/stats"
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            url,
+            params={"clerk_id": user["sub"], "workspace": workspace},
+            headers={"X-Internal-Secret": settings.CONTINUUM_INTERNAL_SECRET},
+            timeout=10.0,
+        )
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail="Failed to fetch graph stats from core")
+    return resp.json()
+
+
 @router.get("/graph")
 async def get_graph(workspace: str = "default", user: dict = Depends(get_current_user)):
     url = f"{settings.CONTINUUM_CORE_BASE_URL}/internal/graph"

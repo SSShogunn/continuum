@@ -214,6 +214,56 @@ async def delete_workspace(owner: str = "") -> int:
     return int(result.split()[-1])
 
 
+async def get_memory_stats(clerk_id: str) -> dict:
+    prefix = f"{clerk_id}:%"
+    prefix_len = len(clerk_id) + 1
+    async with pg.pool().acquire() as conn:
+        total = await conn.fetchval(
+            "SELECT COUNT(*) FROM memory WHERE owner LIKE $1", prefix
+        )
+        by_type = await conn.fetch(
+            """
+            SELECT type, COUNT(*) AS count
+            FROM memory
+            WHERE owner LIKE $1
+            GROUP BY type
+            ORDER BY count DESC
+            """,
+            prefix,
+        )
+        by_owner = await conn.fetch(
+            """
+            SELECT owner, COUNT(*) AS count
+            FROM memory
+            WHERE owner LIKE $1
+            GROUP BY owner
+            ORDER BY count DESC
+            """,
+            prefix,
+        )
+        created_per_day = await conn.fetch(
+            """
+            SELECT date_trunc('day', created_at) AS day, COUNT(*) AS count
+            FROM memory
+            WHERE owner LIKE $1
+            GROUP BY day
+            ORDER BY day
+            """,
+            prefix,
+        )
+    return {
+        "total_entries": total,
+        "by_type": [{"type": r["type"], "count": r["count"]} for r in by_type],
+        "by_workspace": [
+            {"workspace": r["owner"][prefix_len:], "count": r["count"]} for r in by_owner
+        ],
+        "created_per_day": [
+            {"day": r["day"].date().isoformat(), "count": r["count"]}
+            for r in created_per_day
+        ],
+    }
+
+
 async def start() -> None:
     logger.info("Memory store ready (embeddings=fastembed:%s)", embeddings.EMBEDDING_MODEL)
 
