@@ -8,6 +8,8 @@ RUN pnpm install --frozen-lockfile
 FROM node:22-alpine AS builder
 RUN corepack enable && corepack prepare pnpm@11.18.0 --activate
 WORKDIR /app
+ARG BACKEND_INTERNAL_URL
+ENV BACKEND_INTERNAL_URL=${BACKEND_INTERNAL_URL}
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN pnpm run build
