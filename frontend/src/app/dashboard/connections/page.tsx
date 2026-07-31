@@ -98,7 +98,8 @@ export default function ConnectionsPage() {
                       <p className="font-medium text-sm">{clientLabel(conn)}</p>
                       <p className="text-muted-foreground text-xs mt-1">
                         Connected {new Date(conn.granted_at).toLocaleDateString()} · Last used{" "}
-                        {conn.last_used_at ? new Date(conn.last_used_at).toLocaleString() : "never"}
+                        {conn.last_used_at ? new Date(conn.last_used_at).toLocaleString() : "never"} ·{" "}
+                        {conn.token_count} token{conn.token_count === 1 ? "" : "s"}
                       </p>
                     </div>
                     <Button variant="destructive" size="sm" onClick={() => setPendingDisconnect(conn)}>

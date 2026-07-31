@@ -11,6 +11,7 @@ import {
   FileOutput,
   PlayCircle,
   BarChart3,
+  Activity,
   Plug,
   ShieldCheck,
   Settings as SettingsIcon,
@@ -38,6 +39,7 @@ const UserButton = dynamic(() => import("@clerk/nextjs").then((m) => m.UserButto
 
 const NAV_LINKS = [
   { href: "/dashboard", label: "Stats", icon: BarChart3 },
+  { href: "/dashboard/activity", label: "Activity", icon: Activity },
   { href: "/dashboard/memory", label: "Memory", icon: Database },
   { href: "/dashboard/memory-graph", label: "Graph", icon: Share2 },
   { href: "/dashboard/export", label: "Export", icon: FileOutput },
