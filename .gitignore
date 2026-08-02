@@ -44,6 +44,9 @@ coverage/
 
 # ── Internal / planning ────────────────────────────────────────────────────────
 plan.md
+DESIGN.md
+PRODUCT.md
+.impeccable/
 
 # ── Local orchestration ────────────────────────────────────────────────────────
 /docker-compose.yml
