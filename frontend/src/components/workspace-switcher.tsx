@@ -56,8 +56,10 @@ export function WorkspaceSwitcher() {
           </div>
         ) : (
           <DropdownMenuItem
-            closeOnClick={false}
-            onClick={() => setCreating(true)}
+            onSelect={(e) => {
+              e.preventDefault()
+              setCreating(true)
+            }}
             className="gap-1.5 text-muted-foreground"
           >
             <Plus className="size-3.5" />

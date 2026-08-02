@@ -85,23 +85,23 @@ export function DashboardSidebar() {
                 return (
                   <SidebarMenuItem key={link.href}>
                     <SidebarMenuButton
+                      asChild
                       isActive={active}
                       tooltip={link.label}
                       className="relative data-active:bg-transparent"
-                      render={
-                        <Link href={link.href}>
-                          {active && (
-                            <motion.span
-                              layoutId="sidebar-active-pill"
-                              className="absolute inset-0 rounded-md bg-sidebar-accent"
-                              transition={{ duration: 0.15, ease: "easeOut" }}
-                            />
-                          )}
-                          <link.icon className="relative" />
-                          <span className="relative">{link.label}</span>
-                        </Link>
-                      }
-                    />
+                    >
+                      <Link href={link.href}>
+                        {active && (
+                          <motion.span
+                            layoutId="sidebar-active-pill"
+                            className="absolute inset-0 rounded-md bg-sidebar-accent"
+                            transition={{ duration: 0.15, ease: "easeOut" }}
+                          />
+                        )}
+                        <link.icon className="relative" />
+                        <span className="relative">{link.label}</span>
+                      </Link>
+                    </SidebarMenuButton>
                   </SidebarMenuItem>
                 );
               })}
@@ -116,26 +116,23 @@ export function DashboardSidebar() {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
+              asChild
               isActive={pathname.startsWith("/dashboard/settings")}
               tooltip="Settings"
-              render={
-                <Link href="/dashboard/settings">
-                  <SettingsIcon />
-                  <span>Settings</span>
-                </Link>
-              }
-            />
+            >
+              <Link href="/dashboard/settings">
+                <SettingsIcon />
+                <span>Settings</span>
+              </Link>
+            </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>
-            <SidebarMenuButton
-              tooltip="GitHub"
-              render={
-                <a href="https://github.com/SSShogunn/continuum" target="_blank" rel="noopener noreferrer">
-                  <GithubMark />
-                  <span>GitHub</span>
-                </a>
-              }
-            />
+            <SidebarMenuButton asChild tooltip="GitHub">
+              <a href="https://github.com/SSShogunn/continuum" target="_blank" rel="noopener noreferrer">
+                <GithubMark />
+                <span>GitHub</span>
+              </a>
+            </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
         <div className="flex items-center justify-between gap-2 px-2 py-1.5 group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:px-0">
