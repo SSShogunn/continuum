@@ -36,10 +36,12 @@ export function AuthShell({
         </motion.div>
 
         <motion.div
+          data-slot="card"
+          data-surface="paper"
           initial={{ opacity: 0, y: 18, scale: 0.98 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           transition={{ duration: 0.5, delay: 0.08, ease: [0.16, 1, 0.3, 1] }}
-          className="relative w-full min-w-0 overflow-hidden rounded-[var(--radius)] border border-border bg-card px-7 py-8 sm:px-9 sm:py-10 shadow-[0_1px_0_rgba(255,255,255,0.4)_inset,0_14px_30px_-14px_rgba(0,0,0,0.3)] dark:shadow-[0_1px_0_rgba(255,255,255,0.5)_inset,0_24px_48px_-18px_rgba(0,0,0,0.65)] [&_*]:min-w-0 [&_*]:max-w-full"
+          className="relative w-full min-w-0 overflow-hidden rounded-[var(--radius)] border border-border bg-card px-7 py-8 text-card-foreground sm:px-9 sm:py-10 shadow-[0_1px_0_rgba(255,255,255,0.4)_inset,0_14px_30px_-14px_rgba(0,0,0,0.3)] dark:shadow-[0_1px_0_rgba(255,255,255,0.5)_inset,0_24px_48px_-18px_rgba(0,0,0,0.65)] [&_*]:min-w-0 [&_*]:max-w-full"
         >
           <span
             aria-hidden
@@ -57,7 +59,7 @@ export function AuthShell({
             {stamp}
           </span>
 
-          <Link href="/" className="mb-6 inline-block font-heading text-[1.05rem] font-semibold tracking-tight text-foreground">
+          <Link href="/" className="mb-6 inline-block font-heading text-[1.05rem] font-semibold tracking-tight text-card-foreground">
             Continuum
           </Link>
 
