@@ -114,7 +114,7 @@ export default function ActivityPage() {
           <p className="text-muted-foreground text-sm">No tool calls match this filter yet.</p>
         </div>
       ) : (
-        <Card>
+        <Card surface="chrome">
           <CardContent className="p-0">
             <AnimatePresence initial={false}>
               {rows.map((row, i) => {

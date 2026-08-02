@@ -8,8 +8,11 @@
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-  --font-heading: var(--font-sans);
+  --font-mono: var(--font-mono), ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --font-heading: var(--font-display), var(--font-sans);
+  --color-manila: var(--manila);
+  --color-manila-foreground: var(--manila-foreground);
+  --color-stamp: var(--stamp);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -49,72 +52,103 @@
 }
 
 :root {
-  --background: oklch(0.995 0.002 264);
-  --foreground: oklch(0.17 0.014 264);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.17 0.014 264);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.17 0.014 264);
-  --primary: oklch(0.55 0.22 264);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.965 0.005 264);
-  --secondary-foreground: oklch(0.22 0.015 264);
-  --muted: oklch(0.965 0.005 264);
-  --muted-foreground: oklch(0.5 0.014 264);
-  --accent: oklch(0.945 0.014 264);
-  --accent-foreground: oklch(0.22 0.03 264);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.914 0.006 264);
-  --input: oklch(0.914 0.006 264);
-  --ring: oklch(0.55 0.22 264 / 0.5);
-  --chart-1: oklch(0.65 0.2 264);
-  --chart-2: oklch(0.72 0.17 195);
-  --chart-3: oklch(0.75 0.18 70);
-  --chart-4: oklch(0.65 0.22 15);
-  --chart-5: oklch(0.7 0.19 145);
-  --radius: 0.5rem;
-  --sidebar: oklch(0.975 0.005 264);
-  --sidebar-foreground: oklch(0.17 0.014 264);
-  --sidebar-primary: oklch(0.55 0.22 264);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.945 0.014 264);
-  --sidebar-accent-foreground: oklch(0.22 0.03 264);
-  --sidebar-border: oklch(0.914 0.006 264);
-  --sidebar-ring: oklch(0.55 0.22 264 / 0.5);
+  --background: #dfe1e3;
+  --foreground: #201c17;
+  --card: #f9f7ef;
+  --card-foreground: #201c17;
+  --popover: #f9f7ef;
+  --popover-foreground: #201c17;
+  --primary: #d6472f;
+  --primary-foreground: #f9f7ef;
+  --secondary: #e4d5ae;
+  --secondary-foreground: #4a3d22;
+  --muted: #ddd6c2;
+  --muted-foreground: #6b6455;
+  --accent: #ddcda0;
+  --accent-foreground: #3d3218;
+  --destructive: #b3261e;
+  --border: rgba(32, 28, 23, 0.14);
+  --input: rgba(32, 28, 23, 0.16);
+  --ring: rgba(214, 71, 47, 0.5);
+  --manila: #c9a66b;
+  --manila-foreground: #3d3218;
+  --stamp: #ad3623;
+  --chart-1: #d6472f;
+  --chart-2: #4a7a6f;
+  --chart-3: #c9a66b;
+  --chart-4: #7a5a8a;
+  --chart-5: #3d6b8a;
+  --radius: 0.3rem;
+  --sidebar: #d5d8da;
+  --sidebar-foreground: #201c17;
+  --sidebar-primary: #d6472f;
+  --sidebar-primary-foreground: #f9f7ef;
+  --sidebar-accent: #ddcda0;
+  --sidebar-accent-foreground: #3d3218;
+  --sidebar-border: rgba(32, 28, 23, 0.14);
+  --sidebar-ring: rgba(214, 71, 47, 0.5);
 }
 
 .dark {
-  --background: oklch(0.155 0.008 264);
-  --foreground: oklch(0.95 0.005 264);
-  --card: oklch(0.195 0.01 264);
-  --card-foreground: oklch(0.95 0.005 264);
-  --popover: oklch(0.195 0.01 264);
-  --popover-foreground: oklch(0.95 0.005 264);
-  --primary: oklch(0.65 0.2 264);
-  --primary-foreground: oklch(0.15 0.02 264);
-  --secondary: oklch(0.235 0.012 264);
-  --secondary-foreground: oklch(0.95 0.005 264);
-  --muted: oklch(0.225 0.01 264);
-  --muted-foreground: oklch(0.63 0.014 264);
-  --accent: oklch(0.27 0.02 264);
-  --accent-foreground: oklch(0.95 0.005 264);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 8%);
-  --input: oklch(1 0 0 / 12%);
-  --ring: oklch(0.65 0.2 264 / 0.5);
-  --chart-1: oklch(0.7 0.19 264);
-  --chart-2: oklch(0.75 0.15 195);
-  --chart-3: oklch(0.78 0.16 70);
-  --chart-4: oklch(0.7 0.2 15);
-  --chart-5: oklch(0.72 0.17 145);
-  --sidebar: oklch(0.145 0.008 264);
-  --sidebar-foreground: oklch(0.95 0.005 264);
-  --sidebar-primary: oklch(0.65 0.2 264);
-  --sidebar-primary-foreground: oklch(0.15 0.02 264);
-  --sidebar-accent: oklch(0.235 0.012 264);
-  --sidebar-accent-foreground: oklch(0.95 0.005 264);
-  --sidebar-border: oklch(1 0 0 / 8%);
-  --sidebar-ring: oklch(0.65 0.2 264 / 0.5);
+  --background: #1a1c1f;
+  --foreground: #f2efe6;
+  --card: #f2efe6;
+  --card-foreground: #201c17;
+  --popover: #24262a;
+  --popover-foreground: #f2efe6;
+  --primary: #e0563c;
+  --primary-foreground: #f9f7ef;
+  --secondary: #2c2e33;
+  --secondary-foreground: #f2efe6;
+  --muted: #26282c;
+  --muted-foreground: #a8a290;
+  --accent: #33322a;
+  --accent-foreground: #d8c896;
+  --destructive: #e5584a;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.1);
+  --ring: rgba(224, 86, 60, 0.5);
+  --manila: #c9a66b;
+  --manila-foreground: #2a2416;
+  --stamp: #e0563c;
+  --chart-1: #e0563c;
+  --chart-2: #6ba599;
+  --chart-3: #c9a66b;
+  --chart-4: #a184b3;
+  --chart-5: #6b9bc2;
+  --radius: 0.3rem;
+  --sidebar: #1a1c1f;
+  --sidebar-foreground: #f2efe6;
+  --sidebar-primary: #e0563c;
+  --sidebar-primary-foreground: #f9f7ef;
+  --sidebar-accent: #2c2e33;
+  --sidebar-accent-foreground: #f2efe6;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-ring: rgba(224, 86, 60, 0.5);
+}
+
+/* Dark-mode cards flip to warm index-card cream against the steel chrome —
+   re-scope the tokens text/controls inside a card read against, not the page.
+   Reserved for compact accent surfaces (stat tiles, panels); large data-dense
+   list containers use surface="chrome" instead, see below. */
+.dark [data-slot="card"][data-surface="paper"] {
+  --secondary: #e4d5ae;
+  --secondary-foreground: #4a3d22;
+  --muted: #ece7d6;
+  --muted-foreground: #6b6455;
+  --accent: #ddcda0;
+  --accent-foreground: #3d3218;
+  --border: rgba(32, 28, 23, 0.12);
+  --input: rgba(32, 28, 23, 0.14);
+}
+
+/* Large data-dense list containers (activity feed, recent errors, etc.) stay in
+   the steel-chrome family rather than flipping to cream — a whole scrollable
+   list of rows going bright cream reads as too much surface for Operate-mode
+   restraint, so this variant keeps the dark ground's own elevated tone instead. */
+.dark [data-slot="card"][data-surface="chrome"] {
+  --card: #232529;
+  --card-foreground: #f2efe6;
 }
 
 @layer base {
@@ -126,5 +160,22 @@
   }
   html {
     @apply font-sans;
+  }
+
+  h1, h2, h3 {
+    font-family: var(--font-heading);
+    letter-spacing: -0.01em;
+  }
+
+  [data-slot="card"] {
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.35) inset,
+      0 1px 2px rgba(0, 0, 0, 0.06);
+  }
+
+  .dark [data-slot="card"] {
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.5) inset,
+      0 10px 24px -12px rgba(0, 0, 0, 0.5);
   }
 }

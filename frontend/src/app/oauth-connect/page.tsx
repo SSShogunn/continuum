@@ -3,12 +3,17 @@
 import { useUser } from "@clerk/nextjs";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
+import { ShieldCheck } from "lucide-react";
+import { AuthShell } from "@/components/auth-shell";
+import { Button } from "@/components/ui/button";
 
 export default function OAuthConnectPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-screen items-center justify-center text-gray-500">Loading…</div>
+        <AuthShell tab="AUTHORIZE CLIENT" stamp={"PENDING\nREVIEW"}>
+          <p className="font-mono text-sm text-muted-foreground">Loading…</p>
+        </AuthShell>
       }
     >
       <OAuthConnectContent />
@@ -65,56 +70,60 @@ function OAuthConnectContent() {
   }
 
   if (!isLoaded || !isSignedIn) {
-    return <div className="flex min-h-screen items-center justify-center text-gray-500">Loading…</div>;
+    return (
+      <AuthShell tab="AUTHORIZE CLIENT" stamp={"PENDING\nREVIEW"}>
+        <p className="font-mono text-sm text-muted-foreground">Loading…</p>
+      </AuthShell>
+    );
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-6">
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-8 max-w-md w-full space-y-6">
-        <div className="text-center space-y-2">
-          <h1 className="text-2xl font-bold">Connect to Continuum</h1>
-          <p className="text-gray-400 text-sm">
+    <AuthShell tab="AUTHORIZE CLIENT" stamp={"PENDING\nREVIEW"}>
+      <div className="space-y-6">
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 text-foreground">
+            <ShieldCheck className="size-4 text-primary" />
+            <h1 className="font-heading text-lg font-semibold tracking-tight">Connect to Continuum</h1>
+          </div>
+          <p className="font-mono text-sm text-muted-foreground">
             An MCP client is requesting access to your Continuum memory.
           </p>
         </div>
 
-        <div className="bg-gray-800 rounded-lg px-4 py-3 text-sm space-y-1">
+        <div className="space-y-1.5 rounded-[var(--radius)] border border-border bg-background/60 px-4 py-3 font-mono text-sm">
           <p>
-            <span className="text-gray-500">Signed in as </span>
-            <span className="text-gray-200">{user?.primaryEmailAddress?.emailAddress}</span>
+            <span className="text-muted-foreground">Signed in as </span>
+            <span className="text-foreground">{user?.primaryEmailAddress?.emailAddress}</span>
           </p>
           <p>
-            <span className="text-gray-500">Redirect to </span>
-            <span className="font-mono text-xs text-gray-400 break-all">{redirectUri}</span>
+            <span className="text-muted-foreground">Redirect to </span>
+            <span className="break-all text-xs text-muted-foreground">{redirectUri}</span>
           </p>
         </div>
 
-        <div className="text-sm text-gray-400">
-          <p className="mb-2">This will allow the client to:</p>
-          <ul className="list-disc list-inside space-y-1 text-gray-300">
+        <div className="font-mono text-sm text-muted-foreground">
+          <p className="mb-2 text-[0.68rem] uppercase tracking-[0.06em]">This will allow the client to</p>
+          <ul className="list-inside list-disc space-y-1 text-foreground/90">
             <li>Read and write your memory entries</li>
             <li>Use Continuum tools on your behalf</li>
           </ul>
         </div>
 
-        {error && <p className="text-red-400 text-xs font-mono">{error}</p>}
+        {error && (
+          <p className="rounded-[var(--radius)] border border-destructive/30 bg-destructive/10 px-3 py-2 font-mono text-xs text-destructive">
+            {error}
+          </p>
+        )}
 
         <div className="flex gap-3">
-          <button
-            onClick={allow}
-            disabled={loading}
-            className="flex-1 py-2.5 rounded-lg bg-white text-gray-950 font-medium text-sm hover:bg-gray-200 transition-colors disabled:opacity-50"
-          >
+          <Button onClick={allow} disabled={loading} className="flex-1 font-mono">
             {loading ? "Authorizing…" : "Allow access"}
-          </button>
-          <button
-            onClick={() => window.close()}
-            className="flex-1 py-2.5 rounded-lg border border-gray-700 text-sm hover:border-gray-500 transition-colors"
-          >
+          </Button>
+          <Button onClick={() => window.close()} variant="outline" className="flex-1 font-mono">
             Deny
-          </button>
+          </Button>
         </div>
       </div>
-    </div>
+    </AuthShell>
   );
 }

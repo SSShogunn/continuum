@@ -385,7 +385,7 @@ export default function StatsPage() {
                   View all
                 </Link>
               </div>
-              <Card>
+              <Card surface="chrome">
                 <CardContent className="p-0">
                   {recentErrors.length === 0 ? (
                     <p className="text-muted-foreground text-sm p-4">No recent errors.</p>

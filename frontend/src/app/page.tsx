@@ -1,16 +1,16 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useUser } from "@clerk/nextjs";
-import { Button, buttonVariants } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
+import { ArrowRight, RotateCcw } from "lucide-react";
+import styles from "./page.module.css";
 
 const STEPS = [
-  { title: "Connect", body: "Point any MCP-compatible client (Claude, etc.) at your Continuum endpoint." },
-  { title: "Consent", body: "Authorize via OAuth 2.0 — you control exactly what gets shared." },
-  { title: "Remember", body: "Facts, preferences, and context are extracted and stored automatically." },
-  { title: "Recall", body: "Every future session picks up right where the last one left off." },
+  { number: "REC-01", title: "Connect", body: "Point any MCP-compatible client at your Continuum endpoint." },
+  { number: "REC-02", title: "Consent", body: "Authorize via OAuth 2.0 — you control exactly what gets shared." },
+  { number: "REC-03", title: "Remember", body: "Facts, preferences, and context are extracted and filed automatically." },
+  { number: "REC-04", title: "Recall", body: "Every future session picks up right where the last one left off." },
 ];
 
 const TOOL_GROUPS: { category: string; tools: { name: string; desc: string }[] }[] = [
@@ -44,71 +44,142 @@ const TOOL_GROUPS: { category: string; tools: { name: string; desc: string }[] }
   },
 ];
 
+function GithubMark() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+    </svg>
+  );
+}
+
+function StampBadge({ state }: { state: "verified" | "superseded" }) {
+  const stateClass = state === "verified" ? styles.demoStampVerified : styles.demoStampSuperseded;
+  return (
+    <span className={`${styles.demoStampBadge} ${stateClass}`}>
+      {state === "verified" ? "VERIFIED" : "SUPERSEDED"}
+    </span>
+  );
+}
+
 export default function Home() {
   const { isSignedIn, isLoaded } = useUser();
+  const [saveCount, setSaveCount] = useState(0);
+  const factValue = saveCount % 2 === 0 ? "editor: vim" : "editor: vim, tab width 2";
 
   return (
-    <main>
+    <main className={styles.page}>
       {/* Hero */}
-      <section className="flex flex-col items-center justify-center min-h-screen px-6 text-center">
-        <h1 className="text-5xl font-bold tracking-tight mb-4">Continuum</h1>
-        <p className="text-muted-foreground text-lg max-w-md mb-10">
-          Persistent, semantic memory for your AI tools. Connect once, remember everything.
-        </p>
-        {isLoaded && (
-          <div className="flex gap-4">
-            {isSignedIn ? (
-              <Link href="/dashboard" className={cn(buttonVariants({ size: "lg" }), "px-6 h-11")}>
-                Go to dashboard
-              </Link>
-            ) : (
-              <>
-                <Link href="/sign-up" className={cn(buttonVariants({ size: "lg" }), "px-6 h-11")}>
-                  Get started
-                </Link>
-                <Link
-                  href="/sign-in"
-                  className={cn(buttonVariants({ variant: "outline", size: "lg" }), "px-6 h-11")}
-                >
-                  Sign in
-                </Link>
-              </>
+      <section className={styles.hero}>
+        <div className={styles.drawerTabs}>
+          <span className={styles.drawerTab}>CLAUDE.AI</span>
+          <span className={styles.drawerTab}>CLAUDE CODE</span>
+          <span className={styles.drawerTab}>MCP CLIENTS</span>
+        </div>
+
+        <div className={styles.drawerWrap}>
+          <div className={styles.drawerCard}>
+            <span className={styles.stampMark}>
+              FILED
+              <br />
+              CTM
+            </span>
+            <div className={styles.wordmark}>Continuum</div>
+            <h1 className={styles.headline}>
+              Your AI forgets everything.
+              <br />
+              Yours won&apos;t.
+            </h1>
+            <p className={styles.sub}>
+              One memory, every MCP client. Filed as atomic, cross-referenced facts —
+              never a duplicated blob.
+            </p>
+            {isLoaded && (
+              <div className={styles.ctaRow}>
+                {isSignedIn ? (
+                  <Link href="/dashboard" className={styles.ctaPrimary}>
+                    Go to dashboard
+                    <ArrowRight size={15} />
+                  </Link>
+                ) : (
+                  <>
+                    <Link href="/sign-up" className={styles.ctaPrimary}>
+                      Get started
+                      <ArrowRight size={15} />
+                    </Link>
+                    <Link href="/sign-in" className={styles.ctaSecondary}>
+                      Sign in
+                    </Link>
+                  </>
+                )}
+              </div>
             )}
           </div>
-        )}
+        </div>
       </section>
 
-      {/* How it works */}
-      <section className="max-w-4xl mx-auto px-6 py-20 border-t border-border">
-        <h2 className="text-2xl font-semibold text-center mb-12">How it works</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-8">
-          {STEPS.map((step, i) => (
-            <div key={step.title} className="text-center">
-              <div className="w-8 h-8 mx-auto mb-3 rounded-full bg-muted border border-border flex items-center justify-center text-sm text-muted-foreground">
-                {i + 1}
-              </div>
-              <h3 className="font-medium mb-1">{step.title}</h3>
-              <p className="text-sm text-muted-foreground">{step.body}</p>
+      {/* Mechanism */}
+      <section className={styles.section}>
+        <h2 className={styles.sectionHeading}>Filed, not forgotten</h2>
+        <div className={styles.mechanismGrid}>
+          {STEPS.map((step) => (
+            <div key={step.number} className={styles.mechanismCard}>
+              <span className={styles.callNumber}>{step.number}</span>
+              <h3 className={styles.mechanismTitle}>{step.title}</h3>
+              <p className={styles.mechanismBody}>{step.body}</p>
             </div>
           ))}
         </div>
       </section>
 
-      {/* Tools showcase */}
-      <section className="max-w-4xl mx-auto px-6 py-20 border-t border-border">
-        <h2 className="text-2xl font-semibold text-center mb-12">Tools</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+      {/* Supersede demo */}
+      <section className={`${styles.section} ${styles.demoSection}`}>
+        <h2 className={styles.sectionHeading}>Superseded, never duplicated</h2>
+        <div className={styles.demoLayout}>
+          <div className={styles.demoCopy}>
+            <p>
+              Re-saving a memory doesn&apos;t add a second, half-contradicting entry. The
+              prior fact is stamped superseded — kept, timestamped, never deleted — while
+              search only ever surfaces the current one.
+            </p>
+            <button type="button" className={styles.demoButton} onClick={() => setSaveCount((n) => n + 1)}>
+              <RotateCcw size={14} />
+              Re-save this memory
+            </button>
+          </div>
+          <div className={styles.demoStack}>
+            <div key={saveCount} className={styles.demoCard}>
+              <span className={styles.demoFactLabel}>fact · REC-{String(saveCount + 12).padStart(2, "0")}</span>
+              <span className={styles.demoFactValue}>{factValue}</span>
+              <StampBadge state="verified" />
+            </div>
+            {saveCount > 0 && (
+              <div
+                key={`prev-${saveCount}`}
+                className={styles.demoCard}
+                style={{ transform: "translate(10px, 14px) rotate(-2deg)", zIndex: -1, opacity: 0.9 }}
+              >
+                <span className={styles.demoFactLabel}>fact · REC-{String(saveCount + 11).padStart(2, "0")}</span>
+                <span className={styles.demoFactValue}>editor: vim</span>
+                <StampBadge state="superseded" />
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* Tools */}
+      <section className={styles.section}>
+        <h2 className={styles.sectionHeading}>Every tool, filed by drawer</h2>
+        <div className={styles.toolsGrid}>
           {TOOL_GROUPS.map((group) => (
-            <div key={group.category}>
-              <h3 className="text-sm font-medium text-muted-foreground uppercase mb-3">{group.category}</h3>
-              <div className="space-y-3">
+            <div key={group.category} className={styles.drawerGroup}>
+              <div className={styles.drawerLabel}>{group.category}</div>
+              <div className={styles.toolList}>
                 {group.tools.map((tool) => (
-                  <Card key={tool.name} className="py-0">
-                    <CardContent className="px-3 py-2">
-                      <code className="text-sm font-mono">{tool.name}</code>
-                      <p className="text-xs text-muted-foreground mt-0.5">{tool.desc}</p>
-                    </CardContent>
-                  </Card>
+                  <div key={tool.name} className={styles.toolRow}>
+                    <div className={styles.toolName}>{tool.name}</div>
+                    <div className={styles.toolDesc}>{tool.desc}</div>
+                  </div>
                 ))}
               </div>
             </div>
@@ -116,17 +187,35 @@ export default function Home() {
         </div>
       </section>
 
+      {/* Final CTA */}
+      <section className={styles.section} style={{ paddingTop: 0 }}>
+        <div className={styles.finalCta}>
+          <h2 className={styles.finalCtaHeading}>Connect once. Remembered everywhere.</h2>
+          {isLoaded && !isSignedIn && (
+            <div className={styles.ctaRow} style={{ marginTop: "1.75rem" }}>
+              <Link href="/sign-up" className={styles.ctaPrimary}>
+                Get started
+                <ArrowRight size={15} />
+              </Link>
+            </div>
+          )}
+        </div>
+      </section>
+
       {/* Footer */}
-      <footer className="border-t border-border px-6 py-8 text-center text-sm">
-        <Button
-          variant="link"
-          nativeButton={false}
-          render={
-            <a href="https://github.com/SSShogunn/continuum" target="_blank" rel="noopener noreferrer">
-              GitHub
-            </a>
-          }
-        />
+      <footer className={styles.footer}>
+        <div className={styles.footerInner}>
+          <span className={styles.footerMark}>Continuum</span>
+          <a
+            href="https://github.com/SSShogunn/continuum"
+            target="_blank"
+            rel="noopener noreferrer"
+            className={styles.githubLink}
+          >
+            <GithubMark />
+            GitHub
+          </a>
+        </div>
       </footer>
     </main>
   );

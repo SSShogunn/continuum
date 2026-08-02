@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import dynamic from "next/dynamic";
 import type {
@@ -15,6 +15,68 @@ import { useTheme } from "@/lib/theme-context";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { ErrorBoundary } from "@/components/error-boundary";
+
+// troika-three-text's WebGL SDF text renderer throws an uncaught rejection
+// instead of degrading quietly when ANGLE_instanced_arrays is unavailable
+// (software rendering, some VMs/integrated GPUs) — swallow just that failure
+// so it can't take down the whole dashboard.
+function useSuppressWebglTextErrors() {
+  useEffect(() => {
+    function onRejection(event: PromiseRejectionEvent) {
+      const message = String(event.reason?.message ?? event.reason ?? "");
+      if (message.includes("ANGLE_instanced_arrays") || message.includes("WebGL SDF generation")) {
+        event.preventDefault();
+      }
+    }
+    window.addEventListener("unhandledrejection", onRejection);
+    return () => window.removeEventListener("unhandledrejection", onRejection);
+  }, []);
+}
+
+function GraphUnsupportedFallback() {
+  return (
+    <div className="flex h-full items-center justify-center p-6 text-center">
+      <p className="text-muted-foreground text-sm max-w-sm">
+        The graph view couldn&apos;t start 3D rendering in this browser. Try a different browser or
+        device — this is usually a missing WebGL feature, not a data problem.
+      </p>
+    </div>
+  );
+}
+
+// troika-three-text's floating labels use their own implicit offscreen canvas for
+// SDF text generation, and webgl-sdf-generator hardcodes a plain WebGL1 context for
+// it (`canvas.getContext('webgl', { depth: false })`) regardless of what the main
+// 3D scene uses — it never requests WebGL2. On hybrid-GPU laptops that offscreen
+// canvas can land on a different GPU (often the integrated one) than the visible
+// canvas, with different WebGL1 extension support, so a general WebGL2-capability
+// check doesn't predict this. Replicate the library's own context creation exactly
+// and check for the specific extension (ANGLE_instanced_arrays) it needs; troika's
+// own JS fallback for a missing extension is itself broken and throws instead of
+// degrading, so this is checked and avoided up front rather than caught after the
+// fact. Every other graph feature (nodes, edges, click-to-inspect) works without labels.
+function detectGraphLabelSupport(): boolean {
+  try {
+    const canvas = document.createElement("canvas");
+    const gl = canvas.getContext("webgl", { depth: false }) as WebGLRenderingContext | null;
+    return !!gl?.getExtension("ANGLE_instanced_arrays");
+  } catch {
+    return false;
+  }
+}
+
+function subscribeNever() {
+  return () => {};
+}
+
+// Reads a client-only capability without a hydration mismatch: SSR and the
+// initial client render both report "supported" (matching pre-detection
+// behavior), then this flips to the real value on the client right after
+// mount — same pattern as useHasMounted in theme-toggle.tsx.
+function useLabelsSupported() {
+  return useSyncExternalStore(subscribeNever, detectGraphLabelSupport, () => true);
+}
 
 const GraphCanvas = dynamic(() => import("reagraph").then((m) => m.GraphCanvas), { ssr: false });
 
@@ -136,9 +198,11 @@ function buildGraph(
 }
 
 export default function MemoryGraphPage() {
+  useSuppressWebglTextErrors();
   const { workspace, setWorkspaces } = useWorkspace();
   const { resolvedTheme } = useTheme();
   const reagraphTheme = useReagraphTheme(resolvedTheme);
+  const labelsSupported = useLabelsSupported();
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [selected, setSelected] = useState<{ label: string; data: NodeData } | null>(null);
@@ -193,7 +257,14 @@ export default function MemoryGraphPage() {
   return (
     <main className="px-6 py-6 h-[calc(100vh-3.75rem)] flex flex-col">
       <div className="flex items-center justify-between mb-4 gap-4 shrink-0">
-        <h2 className="text-xl font-semibold shrink-0">Memory graph</h2>
+        <div className="flex items-center gap-2 min-w-0">
+          <h2 className="text-xl font-semibold shrink-0">Memory graph</h2>
+          {!labelsSupported && (
+            <span className="text-muted-foreground text-xs truncate" title="A WebGL feature the node labels need isn't available on this GPU — click a node to see its name instead.">
+              (labels unavailable in this browser)
+            </span>
+          )}
+        </div>
         <Input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -231,19 +302,21 @@ export default function MemoryGraphPage() {
               </p>
             ) : (
               <>
-                <GraphCanvas
-                  ref={graphRef}
-                  nodes={graph.nodes}
-                  edges={graph.edges}
-                  selections={selections}
-                  theme={reagraphTheme}
-                  layoutType="forceDirected2d"
-                  labelType="all"
-                  edgeArrowPosition="end"
-                  draggable
-                  onNodeClick={(n) => setSelected({ label: n.label ?? n.id, data: n.data as NodeData })}
-                  onCanvasClick={() => setSelected(null)}
-                />
+                <ErrorBoundary fallback={<GraphUnsupportedFallback />}>
+                  <GraphCanvas
+                    ref={graphRef}
+                    nodes={graph.nodes}
+                    edges={graph.edges}
+                    selections={selections}
+                    theme={reagraphTheme}
+                    layoutType="forceDirected2d"
+                    labelType={labelsSupported ? "all" : "none"}
+                    edgeArrowPosition="end"
+                    draggable
+                    onNodeClick={(n) => setSelected({ label: n.label ?? n.id, data: n.data as NodeData })}
+                    onCanvasClick={() => setSelected(null)}
+                  />
+                </ErrorBoundary>
                 <div className="absolute bottom-3 right-3 flex flex-col gap-1.5">
                   <button className={CONTROL_BUTTON_CLASS} title="Zoom in" onClick={() => graphRef.current?.zoomIn()}>
                     <ZoomIn className="size-4" />
