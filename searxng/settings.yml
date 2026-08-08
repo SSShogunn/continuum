@@ -1,4 +1,11 @@
-use_default_settings: true
+use_default_settings:
+  engines:
+    keep_only:
+      - duckduckgo
+      - brave
+      - mojeek
+      - bing
+      - wikipedia
 
 server:
   secret_key: "cdd6972f6950390569cf13f6aabe6f1c8e2dcd42de6aae5d9ad01acf7877ac8f"
@@ -9,11 +16,4 @@ search:
   formats:
     - html
     - json
-
-engines:
-  - name: wikidata
-    disabled: true
-  - name: ahmia
-    disabled: true
-  - name: torch
-    disabled: true
+  
