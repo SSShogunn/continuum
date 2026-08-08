@@ -598,7 +598,7 @@ async def extract_structured(
         html, url=url, output_format="markdown", favor_recall=True
     ) or _to_markdown(html)
 
-    model = os.environ.get("CONTINUUM_EXTRACT_MODEL", "groq/llama-3.3-70b-versatile")
+    model = os.environ.get("CONTINUUM_EXTRACT_MODEL", "openai/gpt-5.4-mini")
     api_key = os.environ.get("CONTINUUM_EXTRACT_API_KEY", "")
     kwargs: dict[str, Any] = {"api_key": api_key} if api_key else {}
 
