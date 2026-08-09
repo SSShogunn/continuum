@@ -9,6 +9,18 @@ RRF_K = 60
 NODE_MATCH_GATE = 0.5
 
 
+def rrf_fuse(ranked_lists, key: str) -> tuple[dict, dict]:
+    """Reciprocal-rank-fuse multiple ranked result sets keyed by `key`."""
+    scores: dict = {}
+    rows: dict = {}
+    for ranked in ranked_lists:
+        for rank, r in enumerate(ranked):
+            k = r[key]
+            scores[k] = scores.get(k, 0.0) + 1.0 / (RRF_K + rank + 1)
+            rows[k] = r
+    return scores, rows
+
+
 async def graph_search(owner: str, entity: str) -> dict | None:
     norm = entity.strip().lower()
     query_embedding = await embed(entity)
@@ -82,20 +94,14 @@ async def fact_search(owner: str, query: str, top_k: int = 5) -> list[dict]:
             JOIN entity_node s ON s.id = e.source_id
             JOIN entity_node t ON t.id = e.target_id
             WHERE e.owner = $1 AND e.expired_at IS NULL
-              AND to_tsvector('english', e.fact) @@ plainto_tsquery('english', $2)
-            ORDER BY ts_rank(to_tsvector('english', e.fact), plainto_tsquery('english', $2)) DESC
+              AND e.fact_tsv @@ plainto_tsquery('english', $2)
+            ORDER BY ts_rank(e.fact_tsv, plainto_tsquery('english', $2)) DESC
             LIMIT $3
             """,
             owner, query, pool_size,
         )
 
-    scores: dict[int, float] = {}
-    rows: dict[int, dict] = {}
-    for ranked in (semantic, lexical):
-        for rank, r in enumerate(ranked):
-            scores[r["id"]] = scores.get(r["id"], 0.0) + 1.0 / (RRF_K + rank + 1)
-            rows[r["id"]] = r
-
+    scores, rows = rrf_fuse((semantic, lexical), key="id")
     top = sorted(scores, key=lambda i: scores[i], reverse=True)[:top_k]
     return [
         {

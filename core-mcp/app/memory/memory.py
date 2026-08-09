@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from ..infra import pg
 from . import embeddings, kg
 from .embeddings import embed
+from .search import rrf_fuse
 
 logger = logging.getLogger("continuum.memory")
 
@@ -53,10 +54,9 @@ async def search(query: str, top_k: int = 5, type: str | None = None, owner: str
     pool_size = top_k * 4
     async with pg.pool().acquire() as conn:
         if type:
-            rows = await conn.fetch(
+            semantic = await conn.fetch(
                 """
-                SELECT name, type, description, content, updated_at,
-                       1 - (embedding <=> $1) AS score
+                SELECT name, type, description, content, updated_at
                 FROM memory
                 WHERE owner = $2 AND type = $3 AND archived_at IS NULL
                 ORDER BY embedding <=> $1
@@ -64,11 +64,21 @@ async def search(query: str, top_k: int = 5, type: str | None = None, owner: str
                 """,
                 query_embedding, owner, type, pool_size,
             )
-        else:
-            rows = await conn.fetch(
+            lexical = await conn.fetch(
                 """
-                SELECT name, type, description, content, updated_at,
-                       1 - (embedding <=> $1) AS score
+                SELECT name, type, description, content, updated_at
+                FROM memory
+                WHERE owner = $1 AND type = $2 AND archived_at IS NULL
+                  AND content_tsv @@ plainto_tsquery('english', $3)
+                ORDER BY ts_rank(content_tsv, plainto_tsquery('english', $3)) DESC
+                LIMIT $4
+                """,
+                owner, type, query, pool_size,
+            )
+        else:
+            semantic = await conn.fetch(
+                """
+                SELECT name, type, description, content, updated_at
                 FROM memory
                 WHERE owner = $2 AND archived_at IS NULL
                 ORDER BY embedding <=> $1
@@ -76,14 +86,28 @@ async def search(query: str, top_k: int = 5, type: str | None = None, owner: str
                 """,
                 query_embedding, owner, pool_size,
             )
+            lexical = await conn.fetch(
+                """
+                SELECT name, type, description, content, updated_at
+                FROM memory
+                WHERE owner = $1 AND archived_at IS NULL
+                  AND content_tsv @@ plainto_tsquery('english', $2)
+                ORDER BY ts_rank(content_tsv, plainto_tsquery('english', $2)) DESC
+                LIMIT $3
+                """,
+                owner, query, pool_size,
+            )
+
+    scores, rows = rrf_fuse((semantic, lexical), key="name")
 
     now = datetime.now(timezone.utc)
     scored = []
-    for row in rows:
+    for name, rrf_score in scores.items():
+        row = rows[name]
         updated_at = row["updated_at"]
         age_days = max((now - updated_at).total_seconds() / 86400, 0.0)
         recency_factor = 0.5 ** (age_days / HALF_LIFE_DAYS)
-        final_score = row["score"] * (RECENCY_FLOOR + (1 - RECENCY_FLOOR) * recency_factor)
+        final_score = rrf_score * (RECENCY_FLOOR + (1 - RECENCY_FLOOR) * recency_factor)
         scored.append((final_score, row))
     scored.sort(key=lambda pair: pair[0], reverse=True)
     scored = scored[:top_k]
