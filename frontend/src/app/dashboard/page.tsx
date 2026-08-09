@@ -266,7 +266,7 @@ export default function StatsPage() {
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <section>
               <h3 className="text-sm font-medium text-muted-foreground mb-3">Calls (last 14 days)</h3>
-              <Card>
+              <Card surface="chrome">
                 <CardContent className="h-64 pt-4">
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={dailyTotals}>
@@ -293,7 +293,7 @@ export default function StatsPage() {
 
             <section>
               <h3 className="text-sm font-medium text-muted-foreground mb-3">Calls by tool</h3>
-              <Card>
+              <Card surface="chrome">
                 <CardContent className="h-64 pt-4">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={stats.per_tool} layout="vertical" margin={{ left: 24 }}>
@@ -315,7 +315,7 @@ export default function StatsPage() {
 
           <section>
             <h3 className="text-sm font-medium text-muted-foreground mb-3">Calls by tool over time</h3>
-            <Card>
+            <Card surface="chrome">
               <CardContent className="h-64 pt-4">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={stackedByDay}>
@@ -351,7 +351,7 @@ export default function StatsPage() {
 
           <section>
             <h3 className="text-sm font-medium text-muted-foreground mb-3">Breakdown</h3>
-            <Card>
+            <Card surface="chrome">
               <CardContent>
                 <table className="w-full text-sm">
                   <thead>
@@ -411,7 +411,7 @@ export default function StatsPage() {
 
             <section>
               <h3 className="text-sm font-medium text-muted-foreground mb-3">Memory breakdown</h3>
-              <Card>
+              <Card surface="chrome">
                 <CardContent className="space-y-3">
                   {!memoryStats || memoryStats.total_entries === 0 ? (
                     <p className="text-muted-foreground text-sm">No memory entries yet.</p>

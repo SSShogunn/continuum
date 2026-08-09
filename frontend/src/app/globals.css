@@ -92,8 +92,8 @@
 .dark {
   --background: #1a1c1f;
   --foreground: #f2efe6;
-  --card: #f2efe6;
-  --card-foreground: #201c17;
+  --card: #232529;
+  --card-foreground: #f2efe6;
   --popover: #24262a;
   --popover-foreground: #f2efe6;
   --primary: #e0563c;
@@ -127,29 +127,10 @@
   --sidebar-ring: rgba(224, 86, 60, 0.5);
 }
 
-/* Dark-mode cards flip to warm index-card cream against the steel chrome —
-   re-scope the tokens text/controls inside a card read against, not the page.
-   Reserved for compact accent surfaces (stat tiles, panels); large data-dense
-   list containers use surface="chrome" instead, see below. */
-.dark [data-slot="card"][data-surface="paper"] {
-  --secondary: #e4d5ae;
-  --secondary-foreground: #4a3d22;
-  --muted: #ece7d6;
-  --muted-foreground: #6b6455;
-  --accent: #ddcda0;
-  --accent-foreground: #3d3218;
-  --border: rgba(32, 28, 23, 0.12);
-  --input: rgba(32, 28, 23, 0.14);
-}
-
-/* Large data-dense list containers (activity feed, recent errors, etc.) stay in
-   the steel-chrome family rather than flipping to cream — a whole scrollable
-   list of rows going bright cream reads as too much surface for Operate-mode
-   restraint, so this variant keeps the dark ground's own elevated tone instead. */
-.dark [data-slot="card"][data-surface="chrome"] {
-  --card: #232529;
-  --card-foreground: #f2efe6;
-}
+/* All dark-mode cards (paper and chrome) now share the same steel-chrome
+   surface — cream cards were dropped in favor of a uniform dark theme, so
+   surface="paper" vs "chrome" no longer changes anything. The prop is kept
+   on call sites for now rather than ripped out everywhere at once. */
 
 @layer base {
   * {

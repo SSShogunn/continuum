@@ -294,7 +294,7 @@ export default function MemoryGraphPage() {
       </div>
 
       <div className="flex gap-4 flex-1 min-h-0">
-        <Card className="flex-1 overflow-hidden py-0">
+        <Card surface="chrome" className="flex-1 overflow-hidden py-0">
           <CardContent className="p-0 relative h-full">
             {graph.nodes.length === 0 ? (
               <p className="text-muted-foreground text-sm p-6">
@@ -345,7 +345,7 @@ export default function MemoryGraphPage() {
               transition={{ duration: 0.15, ease: "easeOut" }}
               className="w-80 shrink-0"
             >
-              <Card className="overflow-y-auto h-full">
+              <Card surface="chrome" className="overflow-y-auto h-full">
                 <CardContent className="space-y-3">
                   <div className="flex items-center justify-between">
                     <h3 className="font-medium text-sm">{selected.label}</h3>
