@@ -1,4 +1,5 @@
 import logging
+import os
 
 from ..infra import pg
 from .embeddings import embed
@@ -7,6 +8,7 @@ logger = logging.getLogger("continuum.search")
 
 RRF_K = 60
 NODE_MATCH_GATE = 0.5
+HOOK_RELEVANCE_GATE = float(os.environ.get("CONTINUUM_HOOK_RELEVANCE_GATE", "0.45"))
 
 
 def rrf_fuse(ranked_lists, key: str) -> tuple[dict, dict]:
@@ -69,6 +71,30 @@ async def graph_search(owner: str, entity: str) -> dict | None:
             for r in edges
         ],
     }
+
+
+async def is_relevant(owner: str, query_embedding: list[float], gate: float = HOOK_RELEVANCE_GATE) -> bool:
+    """Cheap top-1 cosine check used to gate auto-injected context — cuts noise on
+    messages with nothing worth surfacing (small talk, unrelated topics) without
+    paying for a full hybrid search first."""
+    async with pg.pool().acquire() as conn:
+        memory_score = await conn.fetchval(
+            """
+            SELECT 1 - (embedding <=> $1) FROM memory
+            WHERE owner = $2 AND archived_at IS NULL
+            ORDER BY embedding <=> $1 LIMIT 1
+            """,
+            query_embedding, owner,
+        )
+        fact_score = await conn.fetchval(
+            """
+            SELECT 1 - (fact_embedding <=> $1) FROM entity_edge
+            WHERE owner = $2 AND expired_at IS NULL
+            ORDER BY fact_embedding <=> $1 LIMIT 1
+            """,
+            query_embedding, owner,
+        )
+    return max(memory_score or 0.0, fact_score or 0.0) >= gate
 
 
 async def fact_search(owner: str, query: str, top_k: int = 5) -> list[dict]:

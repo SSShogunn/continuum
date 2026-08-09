@@ -33,6 +33,7 @@ load_dotenv()
 
 
 ICON_PATH = Path(__file__).parent / "icons" / "logo.svg"
+INSTALL_HOOK_SCRIPT_PATH = Path(__file__).parent / "scripts" / "install-hook.sh"
 
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -149,6 +150,8 @@ kebab-case, descriptive: `user-role`, `project-continuum-status`, `preference-co
 `person-alice-context`.
 """.strip()
 
+_jwt_verifier = auth.build_verifier()
+
 mcp = FastMCP(
     "Continuum",
     instructions=_INSTRUCTIONS,
@@ -158,7 +161,7 @@ mcp = FastMCP(
             src="https://continuum-mcp.sshogunn.org/icon.svg", mimeType="image/svg+xml"
         )
     ],
-    auth=auth.build_verifier(),
+    auth=_jwt_verifier,
 )
 mcp.add_middleware(RequestLoggingMiddleware())
 
@@ -166,6 +169,19 @@ mcp.add_middleware(RequestLoggingMiddleware())
 @mcp.custom_route("/icon.svg", methods=["GET"])
 async def serve_app_icon(request: Request) -> Response:
     return Response(ICON_PATH.read_bytes(), media_type="image/svg+xml")
+
+
+@mcp.custom_route("/install-hook.sh", methods=["GET"])
+async def serve_install_hook(request: Request) -> Response:
+    """Public — the script only sets up the local hook; it needs a token
+    (from the dashboard) to actually authenticate once run. See
+    `README.md` / the dashboard's Settings > API Tokens tab for the
+    `curl | bash` command this is meant to be piped into."""
+    return Response(
+        INSTALL_HOOK_SCRIPT_PATH.read_bytes(),
+        media_type="text/x-shellscript",
+        headers={"Content-Disposition": "inline; filename=install-hook.sh"},
+    )
 
 
 def _check_internal_secret(request: Request) -> bool:
@@ -245,6 +261,32 @@ async def internal_prompt(request: Request) -> Response:
     else:
         return Response("Invalid mode", status_code=400)
     return JSONResponse({"prompt": text})
+
+
+@mcp.custom_route("/hook/context", methods=["POST"])
+async def hook_context(request: Request) -> Response:
+    """Bearer-JWT-gated, low-latency context lookup for client-side automation
+    (e.g. a Claude Code UserPromptSubmit hook) that wants to inject relevant
+    memory into every message without going through a model-invoked tool call.
+    Uses the same manual/OAuth JWTs already accepted by the MCP transport —
+    mint one from the dashboard's Settings page. Returns {"context": null} when
+    nothing clears the relevance gate, so irrelevant turns inject nothing."""
+    if _jwt_verifier is None:
+        return Response("Not configured", status_code=503)
+    authz = request.headers.get("authorization", "")
+    if not authz.lower().startswith("bearer "):
+        return JSONResponse({"error": "Missing bearer token"}, status_code=401)
+    access_token = await _jwt_verifier.verify_token(authz[7:].strip())
+    if access_token is None:
+        return JSONResponse({"error": "Invalid or expired token"}, status_code=401)
+
+    body = await request.json()
+    query = (body.get("query") or "").strip()
+    if not query:
+        return JSONResponse({"context": None})
+    owner = auth.compose_owner(access_token.client_id, body.get("workspace", "default"))
+    context = await prompt.build_hook_context(owner, query)
+    return JSONResponse({"context": context})
 
 
 @mcp.custom_route("/internal/memory/delete", methods=["POST"])

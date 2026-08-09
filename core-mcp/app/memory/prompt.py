@@ -1,6 +1,7 @@
 import asyncio
 
 from . import memory, search
+from .embeddings import embed
 
 
 def _memory_block(e: dict) -> str:
@@ -45,6 +46,34 @@ async def build_selection(owner: str, names: list[str]) -> str:
     if not entries:
         return "No memory entries found."
     return "# Continuum Memory Export — selected entries\n\n" + _memory_section(entries)
+
+
+async def build_hook_context(owner: str, query: str, top_k: int = 3) -> str | None:
+    """Compact, gated context for automatic per-message injection (e.g. a
+    UserPromptSubmit hook) — returns None when nothing clears the relevance gate,
+    so irrelevant turns inject nothing. Deliberately lean (names/descriptions and
+    fact lines, not full memory content) since this rides on every message;
+    the model can call memory_search/memory_fact_search itself for full detail."""
+    query_embedding = await embed(query[:500])
+    if not await search.is_relevant(owner, query_embedding):
+        return None
+
+    entries, facts = await asyncio.gather(
+        memory.search(query, top_k=top_k, owner=owner),
+        search.fact_search(owner, query, top_k=top_k * 2),
+    )
+    if not entries and not facts:
+        return None
+
+    parts = ["[Continuum memory — relevant to this message]"]
+    if facts:
+        parts.append(_fact_lines(facts))
+    if entries:
+        parts.append(
+            "\n".join(f"- {e['name']} [{e['type']}]: {e['description']}" for e in entries)
+        )
+    parts.append("(call memory_search / memory_fact_search for full detail if needed)")
+    return "\n".join(parts)
 
 
 async def build_entity(owner: str, entity: str) -> str:
