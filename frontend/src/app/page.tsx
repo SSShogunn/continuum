@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useUser } from "@clerk/nextjs";
 import { ArrowRight, RotateCcw } from "lucide-react";
+import { ContinuumMark } from "@/components/continuum-mark";
 import styles from "./page.module.css";
 
 const STEPS = [
@@ -205,7 +206,10 @@ export default function Home() {
       {/* Footer */}
       <footer className={styles.footer}>
         <div className={styles.footerInner}>
-          <span className={styles.footerMark}>Continuum</span>
+          <span className={styles.footerMark}>
+            <ContinuumMark className="size-3.5 shrink-0" />
+            Continuum
+          </span>
           <a
             href="https://github.com/SSShogunn/continuum"
             target="_blank"

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { motion } from "motion/react";
+import { ContinuumMark } from "@/components/continuum-mark";
 
 export function AuthShell({
   tab,
@@ -59,7 +60,8 @@ export function AuthShell({
             {stamp}
           </span>
 
-          <Link href="/" className="mb-6 inline-block font-heading text-[1.05rem] font-semibold tracking-tight text-card-foreground">
+          <Link href="/" className="mb-6 flex items-center gap-2 font-heading text-[1.05rem] font-semibold tracking-tight text-card-foreground">
+            <ContinuumMark className="size-4 shrink-0 text-primary" />
             Continuum
           </Link>
 

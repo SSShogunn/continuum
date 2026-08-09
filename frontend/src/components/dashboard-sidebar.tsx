@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/sidebar";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { ContinuumMark } from "@/components/continuum-mark";
 
 const UserButton = dynamic(() => import("@clerk/nextjs").then((m) => m.UserButton), {
   ssr: false,
@@ -65,8 +66,12 @@ export function DashboardSidebar() {
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
-        <Link href="/dashboard" className="px-2 py-1.5 font-heading font-semibold text-lg tracking-tight group-data-[collapsible=icon]:hidden">
-          Continuum
+        <Link
+          href="/dashboard"
+          className="flex items-center gap-2 px-2 py-1.5 font-heading font-semibold text-lg tracking-tight text-primary group-data-[collapsible=icon]:justify-center"
+        >
+          <ContinuumMark className="size-4 shrink-0" />
+          <span className="text-foreground group-data-[collapsible=icon]:hidden">Continuum</span>
         </Link>
         <div className="group-data-[collapsible=icon]:hidden">
           <WorkspaceSwitcher />
