@@ -6,6 +6,14 @@ from app.config import settings
 _clerk = Clerk(bearer_auth=settings.CLERK_SECRET_KEY)
 
 
+def require_internal_secret(request: Request) -> None:
+    """Gate for routes called by core-mcp rather than an end user — mirrors
+    core-mcp's own _check_internal_secret for the reverse direction."""
+    secret = request.headers.get("X-Internal-Secret", "")
+    if not settings.CONTINUUM_INTERNAL_SECRET or secret != settings.CONTINUUM_INTERNAL_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+
 async def get_current_user(request: Request) -> dict:
     state = _clerk.authenticate_request(
         request,

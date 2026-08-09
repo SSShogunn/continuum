@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -51,6 +52,15 @@ logging.basicConfig(
 logger = logging.getLogger("continuum")
 
 
+REVOCATION_POLL_SECONDS = int(os.environ.get("CONTINUUM_REVOCATION_POLL_SECONDS", "30"))
+
+
+async def _poll_revoked_jtis() -> None:
+    while True:
+        await auth.refresh_revoked_jtis()
+        await asyncio.sleep(REVOCATION_POLL_SECONDS)
+
+
 @asynccontextmanager
 async def lifespan(server: "FastMCP"):
     await browser_pool.start()
@@ -58,9 +68,14 @@ async def lifespan(server: "FastMCP"):
     await redis_infra.start()
     await db.start()
     await memory.start()
+    await auth.refresh_revoked_jtis()
+    poll_task = asyncio.create_task(_poll_revoked_jtis())
     try:
         yield {}
     finally:
+        poll_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await poll_task
         await memory.stop()
         await db.stop()
         await redis_infra.stop()
