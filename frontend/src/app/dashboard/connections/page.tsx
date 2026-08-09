@@ -20,6 +20,53 @@ interface Connection {
   token_count: number;
 }
 
+const MCP_URL =
+  process.env.NEXT_PUBLIC_CONTINUUM_MCP_URL || "https://continuum-mcp.sshogunn.org";
+const CLAUDE_CODE_CONNECT_COMMAND = `claude mcp add --transport http continuum ${MCP_URL}/mcp`;
+
+function GettingStarted() {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    await navigator.clipboard.writeText(CLAUDE_CODE_CONNECT_COMMAND);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <section>
+      <h2 className="text-xl font-semibold mb-4">Getting started</h2>
+      <div className="space-y-3">
+        <Card>
+          <CardContent className="space-y-2">
+            <p className="font-medium text-sm">Claude Code</p>
+            <p className="text-muted-foreground text-xs">
+              Run this in a terminal — it opens a browser to sign in and connect:
+            </p>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 text-xs break-all bg-muted rounded p-3 font-mono">
+                {CLAUDE_CODE_CONNECT_COMMAND}
+              </code>
+              <Button onClick={copy} variant="outline" size="sm">
+                {copied ? "Copied!" : "Copy"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="space-y-1">
+            <p className="font-medium text-sm">Claude.ai</p>
+            <p className="text-muted-foreground text-xs">
+              Settings → Connectors → Add custom connector → paste{" "}
+              <code className="text-foreground">{MCP_URL}/mcp</code>
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    </section>
+  );
+}
+
 interface ManualToken {
   id: string;
   label: string;
@@ -78,6 +125,8 @@ export default function ConnectionsPage() {
   return (
     <>
       <main className="max-w-3xl mx-auto px-6 py-10 space-y-10">
+        <GettingStarted />
+
         <section>
           <h2 className="text-xl font-semibold mb-4">Connected clients</h2>
 

@@ -27,6 +27,9 @@ interface TokenMeta {
   lastUsedAt: string | null;
 }
 
+const MCP_URL =
+  process.env.NEXT_PUBLIC_CONTINUUM_MCP_URL || "https://continuum-mcp.sshogunn.org";
+
 const THEME_OPTIONS = [
   { value: "light" as const, label: "Light", icon: Sun },
   { value: "dark" as const, label: "Dark", icon: Moon },
@@ -141,22 +144,48 @@ function TokensTab() {
     setTimeout(() => setCopied(false), 2000);
   }
 
+  const [installCopied, setInstallCopied] = useState(false);
+  const installCommand = newToken
+    ? `curl -fsSL ${MCP_URL}/install-hook.sh | CONTINUUM_TOKEN=${newToken} bash`
+    : "";
+
+  async function copyInstallCommand() {
+    if (!installCommand) return;
+    await navigator.clipboard.writeText(installCommand);
+    setInstallCopied(true);
+    setTimeout(() => setInstallCopied(false), 2000);
+  }
+
   const activeToken = tokens.find((t) => !t.revokedAt);
 
   return (
     <div className="space-y-6 mt-4">
       {newToken ? (
-        <Card className="border-yellow-700 bg-yellow-900/20">
+        <Card className="border-accent bg-accent/25">
           <CardContent className="space-y-3">
-            <p className="text-yellow-300 text-sm font-medium">
+            <p className="text-accent-foreground text-sm font-medium">
               Copy this token now — it will not be shown again.
             </p>
-            <code className="block text-xs break-all bg-black/30 rounded p-3 font-mono">
+            <code className="block text-xs break-all rounded border border-border bg-background/60 p-3 font-mono">
               {newToken}
             </code>
-            <Button onClick={copy} className="bg-yellow-600 hover:bg-yellow-500 text-white">
-              {copied ? "Copied!" : "Copy to clipboard"}
-            </Button>
+            <Button onClick={copy}>{copied ? "Copied!" : "Copy to clipboard"}</Button>
+
+            <div className="pt-3 border-t border-accent/40 space-y-2">
+              <p className="text-accent-foreground text-sm font-medium">
+                Optional: auto-context for Claude Code
+              </p>
+              <p className="text-accent-foreground/70 text-xs">
+                Injects relevant memory into every message automatically, instead of relying on
+                Claude to call memory_search itself. Run this in a terminal:
+              </p>
+              <code className="block text-xs break-all rounded border border-border bg-background/60 p-3 font-mono">
+                {installCommand}
+              </code>
+              <Button onClick={copyInstallCommand} variant="outline" size="sm">
+                {installCopied ? "Copied!" : "Copy command"}
+              </Button>
+            </div>
           </CardContent>
         </Card>
       ) : (
