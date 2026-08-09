@@ -12,6 +12,29 @@ connect securely and keep the same memory across sessions.
 
 OAuth 2.0 (register → authorize → consent → token exchange) is verified working with Claude.ai.
 
+## Connecting a client
+
+Continuum is hosted at `continuum-mcp.sshogunn.org` — most people don't need to run any of this
+themselves, just connect a client to the hosted instance:
+
+1. Sign up / log in at the [dashboard](https://continuum.sshogunn.org).
+2. **Claude Code**: `claude mcp add --transport http continuum https://continuum-mcp.sshogunn.org/mcp`
+   — opens a browser to sign in and authorize.
+3. **Claude.ai**: Settings → Connectors → Add custom connector →
+   `https://continuum-mcp.sshogunn.org/mcp`.
+4. Optional — **auto-context for Claude Code**: the dashboard's Settings → API Tokens tab shows a
+   one-line `curl | bash` install command after generating a token. It wires up a
+   `UserPromptSubmit` hook that injects relevant memory into every message automatically, instead
+   of relying on Claude to decide to call `memory_search` (see "Auto-injected context" below). The
+   Connections page also has the copy-paste connect commands above.
+
+Both connection paths (steps 2–3) go through OAuth — no token to copy/paste. The manual token used
+in step 4 exists specifically for non-interactive automation (the hook script has no browser to
+complete an OAuth flow with), the same way most APIs pair OAuth for apps with a separate
+long-lived key for CLI/scripts. Revoking a connection or token (Connections page) takes effect
+within `CONTINUUM_REVOCATION_POLL_SECONDS` (default 30s) — `core-mcp` polls `backend` for
+revocations rather than checking on every request, since the JWTs here carry no `exp` claim.
+
 ## How memory works
 
 A saved memory isn't just a blob with an embedding — saving one triggers a background pipeline:
@@ -46,8 +69,22 @@ indexes — no in-Python similarity loop.
 | `memory_save` / `memory_search` / `memory_list` / `memory_delete` | Persistent memory CRUD, per-user (scoped by JWT `owner`). |
 | `memory_fact_search` | Semantic search over extracted atomic facts (see above). |
 
-Plus an MCP resource (`memory://context` — full memory context, loaded automatically) and two
-prompts (`session_summary`, `load_context`).
+Plus an MCP resource (`memory://context` — full memory context; not auto-loaded by most clients,
+call it explicitly) and two prompts (`session_summary`, `load_context`).
+
+### Auto-injected context (bypassing the tool-call round trip)
+
+Because retrieval above is entirely model-invoked — the connected LLM has to decide to call
+`memory_search` — a `POST /hook/context` route offers a second path for client-side automation
+that wants relevant memory injected into *every* message without relying on that decision.
+Bearer-JWT-gated (same manual/OAuth tokens the MCP transport already accepts — mint one from the
+dashboard's Settings page), it embeds the query once, gates on a cheap top-1 cosine check so
+irrelevant messages inject nothing (`{"context": null}`), and otherwise returns a compact,
+progressive-disclosure blob (fact lines + memory names/descriptions, not full content) meant to be
+dropped into a host's per-message context hook — e.g. a Claude Code `UserPromptSubmit` hook.
+`GET /install-hook.sh` (`core-mcp/app/scripts/install-hook.sh`) serves a self-contained installer
+for exactly that hook — idempotent, safe to re-run, merges into `~/.claude/settings.json` rather
+than overwriting it.
 
 ## Running it
 
@@ -109,7 +146,9 @@ Each service has an `.env.example` with inline comments for every variable. Nota
 - `core-mcp`: `CONTINUUM_DATABASE_URL`, `CONTINUUM_JWT_PUBLIC_KEY`,
   `CONTINUUM_FACT_EXTRACTION_MODEL`/`_API_KEY` (litellm model string, e.g.
   `anthropic/claude-haiku-4-5-20251001`), `CONTINUUM_SEARXNG_URL` (optional, for `search_web` —
-  defaults to the self-hosted `searxng` service in the root compose file)
+  defaults to the self-hosted `searxng` service in the root compose file). `CONTINUUM_INTERNAL_SECRET`
+  and `CONTINUUM_BACKEND_PUBLIC_URL` are also used to poll `backend` for revoked tokens
+  (`CONTINUUM_REVOCATION_POLL_SECONDS`, default 30, controls how often).
 - `backend`: `DATABASE_URL`, Clerk keys, `CONTINUUM_BACKEND_JWT_PRIVATE_KEY` (paired with
   core-mcp's public key)
 - `frontend`: Clerk keys, `BACKEND_INTERNAL_URL`
