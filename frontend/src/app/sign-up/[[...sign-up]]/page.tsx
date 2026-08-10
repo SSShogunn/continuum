@@ -3,15 +3,15 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { SignUp, useSignUp } from "@clerk/nextjs";
+import { useSignUp } from "@clerk/nextjs";
 import { AuthShell } from "@/components/auth-shell";
-import { getClerkAppearance } from "@/lib/clerk-appearance";
 import { useTheme } from "@/lib/theme-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { GoogleIcon } from "@/components/auth/google-icon";
+import { GitHubIcon } from "@/components/auth/github-icon";
 
 type Step = "details" | "code";
 
@@ -20,11 +20,11 @@ export default function SignUpPage() {
   const { signUp, errors, fetchStatus } = useSignUp();
   const router = useRouter();
 
-  const [fallback, setFallback] = React.useState(false);
   const [step, setStep] = React.useState<Step>("details");
   const [emailAddress, setEmailAddress] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [code, setCode] = React.useState("");
+  const [notice, setNotice] = React.useState<string | null>(null);
 
   const busy = fetchStatus === "fetching";
 
@@ -43,7 +43,9 @@ export default function SignUpPage() {
       setStep("code");
       return;
     }
-    setFallback(true);
+    setNotice(
+      "This account needs an additional step that isn't supported here yet. Please contact support."
+    );
   }
 
   async function handleDetailsSubmit(e: React.FormEvent) {
@@ -68,16 +70,18 @@ export default function SignUpPage() {
     });
     if (error) {
       console.error("Google sign-up failed:", error);
-      setFallback(true);
     }
   }
 
-  if (fallback) {
-    return (
-      <AuthShell tab="NEW FILE" stamp={"OPEN\nFILE"}>
-        <SignUp appearance={getClerkAppearance(resolvedTheme)} />
-      </AuthShell>
-    );
+  async function handleGithub() {
+    const { error } = await signUp.sso({
+      strategy: "oauth_github",
+      redirectUrl: "/dashboard",
+      redirectCallbackUrl: "/sso-callback",
+    });
+    if (error) {
+      console.error("GitHub sign-up failed:", error);
+    }
   }
 
   return (
@@ -101,6 +105,17 @@ export default function SignUpPage() {
         >
           <GoogleIcon className="size-4" />
           Continue with Google
+        </Button>
+
+        <Button
+          type="button"
+          variant="outline"
+          onClick={handleGithub}
+          disabled={busy}
+          className="w-full justify-center gap-2"
+        >
+          <GitHubIcon className="size-4" />
+          Continue with GitHub
         </Button>
 
         <div className="flex items-center gap-3">
@@ -198,6 +213,8 @@ export default function SignUpPage() {
             </Button>
           </form>
         )}
+
+        {notice && <p className="font-mono text-xs text-destructive">{notice}</p>}
 
         {errors.global && errors.global.length > 0 && (
           <p className="font-mono text-xs text-destructive">
