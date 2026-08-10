@@ -168,12 +168,12 @@ export default function StatsPage() {
       .catch(() => {});
 
     fetch("/api/memory/stats")
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`Error ${r.status}`))))
       .then((data) => setMemoryStats(data))
       .catch(() => {});
 
     fetch("/api/memory/graph/stats")
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`Error ${r.status}`))))
       .then((data) => setGraphStats(data))
       .catch(() => {});
   }, []);
@@ -214,7 +214,7 @@ export default function StatsPage() {
     );
   }, [stats]);
 
-  const mostConnected = graphStats?.top_entities[0];
+  const mostConnected = graphStats?.top_entities?.[0];
 
   return (
     <div className="px-6 py-6 space-y-6">
