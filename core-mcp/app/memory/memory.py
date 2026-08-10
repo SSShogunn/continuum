@@ -238,6 +238,12 @@ async def delete_workspace(owner: str = "") -> int:
     return int(result.split()[-1])
 
 
+async def delete_account(clerk_id: str) -> int:
+    async with pg.pool().acquire() as conn:
+        result = await conn.execute("DELETE FROM memory WHERE owner LIKE $1", f"{clerk_id}:%")
+    return int(result.split()[-1])
+
+
 async def get_memory_stats(clerk_id: str) -> dict:
     prefix = f"{clerk_id}:%"
     prefix_len = len(clerk_id) + 1

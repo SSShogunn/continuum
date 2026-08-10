@@ -228,6 +228,12 @@ async def get_recent_activity(
     ]
 
 
+async def delete_account(owner: str) -> int:
+    async with pg.pool().acquire() as conn:
+        result = await conn.execute("DELETE FROM requests WHERE owner = $1", owner)
+    return int(result.split()[-1])
+
+
 async def start() -> None:
     global _queue, _worker
     _queue = asyncio.Queue(maxsize=1000)

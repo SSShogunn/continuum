@@ -28,3 +28,7 @@ async def require_admin(user: dict = Depends(get_current_user)) -> dict:
     if not user.get("public_metadata", {}).get("isAdmin"):
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
+
+
+async def delete_clerk_user(user_id: str) -> None:
+    await _clerk.users.delete_async(user_id=user_id)

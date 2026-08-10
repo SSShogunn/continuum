@@ -168,6 +168,13 @@ async def delete_workspace(owner: str) -> None:
             await conn.execute("DELETE FROM entity_node WHERE owner = $1", owner)
 
 
+async def delete_account(clerk_id: str) -> None:
+    async with pg.pool().acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("DELETE FROM entity_edge WHERE owner LIKE $1", f"{clerk_id}:%")
+            await conn.execute("DELETE FROM entity_node WHERE owner LIKE $1", f"{clerk_id}:%")
+
+
 async def graph_for_owner(owner: str) -> dict:
     async with pg.pool().acquire() as conn:
         edge_rows = await conn.fetch(

@@ -427,6 +427,44 @@ async def internal_graph_stats(request: Request) -> Response:
     return JSONResponse(stats)
 
 
+@mcp.custom_route("/internal/account/export", methods=["GET"])
+async def internal_account_export(request: Request) -> Response:
+    if not _check_internal_secret(request):
+        return Response("Forbidden", status_code=403)
+    clerk_id = request.query_params.get("clerk_id", "")
+    workspaces = await memory.list_workspaces(clerk_id)
+    by_workspace = {}
+    for workspace in workspaces:
+        owner = auth.compose_owner(clerk_id, workspace)
+        by_workspace[workspace] = {
+            "memories": await memory.list_full(owner=owner),
+            "graph": await kg.graph_for_owner(owner),
+        }
+    return JSONResponse({
+        "format": "continuum-account-export",
+        "version": "1",
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "workspaces": by_workspace,
+    })
+
+
+@mcp.custom_route("/internal/account/purge", methods=["POST"])
+async def internal_account_purge(request: Request) -> Response:
+    if not _check_internal_secret(request):
+        return Response("Forbidden", status_code=403)
+    body = await request.json()
+    clerk_id = body.get("clerk_id", "")
+    if not clerk_id:
+        return JSONResponse({"error": "clerk_id required"}, status_code=400)
+    memories_deleted = await memory.delete_account(clerk_id)
+    await kg.delete_account(clerk_id)
+    requests_deleted = await db.delete_account(clerk_id)
+    return JSONResponse({
+        "memories_deleted": memories_deleted,
+        "requests_deleted": requests_deleted,
+    })
+
+
 async def _redirect(request: Request) -> Response:
     target = os.environ.get("CONTINUUM_REDIRECT_URL")
     if not target:
