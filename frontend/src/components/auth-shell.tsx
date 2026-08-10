@@ -1,6 +1,4 @@
-"use client";
-
-import Link from "next/link";
+import { Link } from "react-router-dom";
 import { motion } from "motion/react";
 import { ContinuumMark } from "@/components/continuum-mark";
 
@@ -60,7 +58,7 @@ export function AuthShell({
             {stamp}
           </span>
 
-          <Link href="/" className="mb-6 flex items-center gap-2 font-heading text-[1.05rem] font-semibold tracking-tight text-card-foreground">
+          <Link to="/" className="mb-6 flex items-center gap-2 font-heading text-[1.05rem] font-semibold tracking-tight text-card-foreground">
             <ContinuumMark className="size-4 shrink-0 text-primary" />
             Continuum
           </Link>
@@ -74,7 +72,7 @@ export function AuthShell({
           transition={{ duration: 0.4, delay: 0.35 }}
           className="mt-6 text-center font-mono text-xs text-muted-foreground"
         >
-          <Link href="/" className="transition-colors hover:text-foreground">
+          <Link to="/" className="transition-colors hover:text-foreground">
             ← Back to home
           </Link>
         </motion.p>

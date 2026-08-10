@@ -1,0 +1,189 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: var(--font-mono), ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --font-heading: var(--font-display), var(--font-sans);
+  --color-manila: var(--manila);
+  --color-manila-foreground: var(--manila-foreground);
+  --color-stamp: var(--stamp);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --background: #dfe1e3;
+  --foreground: #201c17;
+  --card: #f9f7ef;
+  --card-foreground: #201c17;
+  --popover: #f9f7ef;
+  --popover-foreground: #201c17;
+  --primary: #d6472f;
+  --primary-foreground: #f9f7ef;
+  --secondary: #e4d5ae;
+  --secondary-foreground: #4a3d22;
+  --muted: #ddd6c2;
+  --muted-foreground: #6b6455;
+  --accent: #ddcda0;
+  --accent-foreground: #3d3218;
+  --destructive: #b3261e;
+  --border: rgba(32, 28, 23, 0.14);
+  --input: rgba(32, 28, 23, 0.16);
+  --ring: rgba(214, 71, 47, 0.5);
+  --manila: #c9a66b;
+  --manila-foreground: #3d3218;
+  --stamp: #ad3623;
+  --chart-1: #d6472f;
+  --chart-2: #4a7a6f;
+  --chart-3: #c9a66b;
+  --chart-4: #7a5a8a;
+  --chart-5: #3d6b8a;
+  --radius: 0.3rem;
+  --sidebar: #d5d8da;
+  --sidebar-foreground: #201c17;
+  --sidebar-primary: #d6472f;
+  --sidebar-primary-foreground: #f9f7ef;
+  --sidebar-accent: #ddcda0;
+  --sidebar-accent-foreground: #3d3218;
+  --sidebar-border: rgba(32, 28, 23, 0.14);
+  --sidebar-ring: rgba(214, 71, 47, 0.5);
+}
+
+.dark {
+  --background: #1a1c1f;
+  --foreground: #f2efe6;
+  --card: #232529;
+  --card-foreground: #f2efe6;
+  --popover: #24262a;
+  --popover-foreground: #f2efe6;
+  --primary: #e0563c;
+  --primary-foreground: #f9f7ef;
+  --secondary: #2c2e33;
+  --secondary-foreground: #f2efe6;
+  --muted: #26282c;
+  --muted-foreground: #a8a290;
+  --accent: #33322a;
+  --accent-foreground: #d8c896;
+  --destructive: #e5584a;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.1);
+  --ring: rgba(224, 86, 60, 0.5);
+  --manila: #c9a66b;
+  --manila-foreground: #2a2416;
+  --stamp: #e0563c;
+  --chart-1: #e0563c;
+  --chart-2: #6ba599;
+  --chart-3: #c9a66b;
+  --chart-4: #a184b3;
+  --chart-5: #6b9bc2;
+  --radius: 0.3rem;
+  --sidebar: #1a1c1f;
+  --sidebar-foreground: #f2efe6;
+  --sidebar-primary: #e0563c;
+  --sidebar-primary-foreground: #f9f7ef;
+  --sidebar-accent: #2c2e33;
+  --sidebar-accent-foreground: #f2efe6;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-ring: rgba(224, 86, 60, 0.5);
+}
+
+/* All dark-mode cards (paper and chrome) now share the same steel-chrome
+   surface — cream cards were dropped in favor of a uniform dark theme, so
+   surface="paper" vs "chrome" no longer changes anything. The prop is kept
+   on call sites for now rather than ripped out everywhere at once. */
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+
+  h1, h2, h3 {
+    font-family: var(--font-heading);
+    letter-spacing: -0.01em;
+  }
+
+  [data-slot="card"] {
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.35) inset,
+      0 1px 2px rgba(0, 0, 0, 0.06);
+  }
+
+  .dark [data-slot="card"] {
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.5) inset,
+      0 10px 24px -12px rgba(0, 0, 0, 0.5);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklch, var(--foreground) 22%, transparent) transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklch, var(--foreground) 22%, transparent);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklch, var(--foreground) 38%, transparent);
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}

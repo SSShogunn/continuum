@@ -1,5 +1,3 @@
-"use client";
-
 import { createContext, useContext, useState } from "react";
 
 interface WorkspaceContextValue {
@@ -15,7 +13,6 @@ const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 const STORAGE_KEY = "continuum:workspace";
 
 function readStoredWorkspace(): string {
-  if (typeof window === "undefined") return "default";
   return window.localStorage.getItem(STORAGE_KEY) ?? "default";
 }
 

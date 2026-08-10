@@ -1,15 +1,10 @@
-"use client";
-
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import dynamic from "next/dynamic";
-import { useUser, useClerk } from "@clerk/nextjs";
+import { Link, useLocation } from "react-router-dom";
+import { useUser, useClerk, UserButton } from "@clerk/clerk-react";
 import { motion } from "motion/react";
 import {
   Database,
   Share2,
   FileOutput,
-  PlayCircle,
   BarChart3,
   Activity,
   Plug,
@@ -25,6 +20,7 @@ function GithubMark() {
     </svg>
   );
 }
+
 import {
   Sidebar,
   SidebarContent,
@@ -42,24 +38,18 @@ import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ContinuumMark } from "@/components/continuum-mark";
 
-const UserButton = dynamic(() => import("@clerk/nextjs").then((m) => m.UserButton), {
-  ssr: false,
-  loading: () => <div className="size-7 rounded-full bg-muted shrink-0" />,
-});
-
 const NAV_LINKS = [
   { href: "/dashboard", label: "Stats", icon: BarChart3 },
   { href: "/dashboard/activity", label: "Activity", icon: Activity },
   { href: "/dashboard/memory", label: "Memory", icon: Database },
   { href: "/dashboard/memory-graph", label: "Graph", icon: Share2 },
   { href: "/dashboard/export", label: "Export", icon: FileOutput },
-  { href: "/dashboard/playground", label: "Playground", icon: PlayCircle },
   { href: "/dashboard/connections", label: "Connections", icon: Plug },
   { href: "/dashboard/admin", label: "Admin", icon: ShieldCheck },
 ];
 
 export function DashboardSidebar() {
-  const pathname = usePathname();
+  const { pathname } = useLocation();
   const { user } = useUser();
   const { signOut } = useClerk();
 
@@ -67,7 +57,7 @@ export function DashboardSidebar() {
     <Sidebar collapsible="icon">
       <SidebarHeader>
         <Link
-          href="/dashboard"
+          to="/dashboard"
           className="flex items-center gap-2 px-2 py-1.5 font-heading font-semibold text-lg tracking-tight text-primary group-data-[collapsible=icon]:justify-center"
         >
           <ContinuumMark className="size-4 shrink-0" />
@@ -95,7 +85,7 @@ export function DashboardSidebar() {
                       tooltip={link.label}
                       className="relative data-active:bg-transparent"
                     >
-                      <Link href={link.href}>
+                      <Link to={link.href}>
                         {active && (
                           <motion.span
                             layoutId="sidebar-active-pill"
@@ -125,7 +115,7 @@ export function DashboardSidebar() {
               isActive={pathname.startsWith("/dashboard/settings")}
               tooltip="Settings"
             >
-              <Link href="/dashboard/settings">
+              <Link to="/dashboard/settings">
                 <SettingsIcon />
                 <span>Settings</span>
               </Link>

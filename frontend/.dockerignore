@@ -3,7 +3,6 @@ Dockerfile
 .git
 .gitignore
 node_modules
-.next
-.env*.local
-.env
+dist
+.env*
 npm-debug.log*
