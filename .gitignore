@@ -48,9 +48,6 @@ DESIGN.md
 PRODUCT.md
 .impeccable/
 
-# ── Local orchestration ────────────────────────────────────────────────────────
-/docker-compose.yml
-
 # ── OS ─────────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db

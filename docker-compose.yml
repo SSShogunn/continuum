@@ -1,0 +1,102 @@
+services:
+  frontend:
+    build: ./frontend
+    container_name: continuum-frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+      - ./frontend/index.html:/app/index.html
+      - ./frontend/vite.config.ts:/app/vite.config.ts
+    env_file:
+      - ./frontend/.env
+    depends_on:
+      - backend
+
+  backend:
+    build: ./backend
+    container_name: continuum-backend
+    ports:
+      - "8789:8789"
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/alembic:/app/alembic
+      - ./backend/alembic.ini:/app/alembic.ini
+      - ./backend/main.py:/app/main.py
+    env_file:
+      - ./backend/.env
+    command: ["sh", "-c", "uv run alembic upgrade head && uv run uvicorn main:app --host 0.0.0.0 --port 8789 --reload"]
+    depends_on:
+      - core-mcp
+      - postgres
+
+  core-mcp:
+    build: ./core-mcp
+    container_name: continuum-core-mcp
+    volumes:
+      - ./core-mcp:/app
+      - core-mcp-venv:/app/.venv
+    env_file:
+      - ./core-mcp/.env
+    command: ["sh", "-c", "uv run alembic upgrade head && uv run watchfiles 'python -m app.server' /app"]
+    depends_on:
+      - searxng
+      - postgres
+      - redis
+
+  worker:
+    build: ./core-mcp
+    container_name: continuum-worker
+    volumes:
+      - ./core-mcp:/app
+      - core-mcp-venv:/app/.venv
+    env_file:
+      - ./core-mcp/.env
+    command: ["uv", "run", "arq", "app.worker.WorkerSettings"]
+    depends_on:
+      - postgres
+      - redis
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: continuum-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: continuum
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: continuum
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    container_name: continuum-redis
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}"]
+    volumes:
+      - redis-data:/data
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: continuum-searxng
+    restart: unless-stopped
+    volumes:
+      - ./searxng:/etc/searxng
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: continuum-cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN}
+    depends_on:
+      - frontend
+      - backend
+      - core-mcp
+
+volumes:
+  core-mcp-venv:
+  postgres-data:
+  redis-data:
