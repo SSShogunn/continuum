@@ -206,10 +206,10 @@ export default function PlaygroundPage() {
   }
 
   return (
-    <main className="max-w-2xl mx-auto px-6 py-10 space-y-6">
+    <main className="max-w-4xl mx-auto px-6 py-10 space-y-6">
         <h2 className="text-xl font-semibold">Tool playground</h2>
 
-        <Card>
+        <Card className="max-w-xl">
           <CardContent className="space-y-4">
             <div className="space-y-1.5">
               <Label>Tool</Label>

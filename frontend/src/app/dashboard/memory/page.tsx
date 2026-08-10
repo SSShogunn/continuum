@@ -197,7 +197,7 @@ export default function MemoryPage() {
                 <p className="text-muted-foreground text-sm">
                   No memory entries in &quot;{workspace}&quot; yet. Use your MCP token with an AI client to
                   create some, or{" "}
-                  <Link href="/dashboard/settings?tab=tokens" className="text-foreground underline underline-offset-2">
+                  <Link href="/dashboard/settings" className="text-foreground underline underline-offset-2">
                     manage tokens in Settings
                   </Link>
                   .
