@@ -30,6 +30,11 @@ interface TokenMeta {
 const MCP_URL =
   process.env.NEXT_PUBLIC_CONTINUUM_MCP_URL || "https://continuum-mcp.sshogunn.org";
 
+function maskSecret(value: string, prefixLen = 8, suffixLen = 4): string {
+  if (value.length <= prefixLen + suffixLen) return value;
+  return `${value.slice(0, prefixLen)}${"•".repeat(12)}${value.slice(-suffixLen)}`;
+}
+
 const THEME_OPTIONS = [
   { value: "light" as const, label: "Light", icon: Sun },
   { value: "dark" as const, label: "Dark", icon: Moon },
@@ -41,43 +46,47 @@ function PreferencesTab() {
   const { workspace, workspaces, setWorkspace } = useWorkspace();
 
   return (
-    <div className="space-y-8 mt-4">
-      <section>
-        <h3 className="text-sm font-medium mb-3">Theme</h3>
-        <div className="flex gap-2">
-          {THEME_OPTIONS.map(({ value, label, icon: Icon }) => (
-            <Button
-              key={value}
-              variant={theme === value ? "default" : "outline"}
-              onClick={() => setTheme(value)}
-              className="gap-1.5"
-            >
-              <Icon className="size-3.5" />
-              {label}
-              {theme === value && <Check className="size-3.5" />}
-            </Button>
-          ))}
-        </div>
-      </section>
+    <div className="grid gap-4 mt-4 sm:grid-cols-2">
+      <Card>
+        <CardContent className="space-y-3">
+          <h3 className="text-sm font-medium">Theme</h3>
+          <div className="flex gap-2">
+            {THEME_OPTIONS.map(({ value, label, icon: Icon }) => (
+              <Button
+                key={value}
+                variant={theme === value ? "default" : "outline"}
+                onClick={() => setTheme(value)}
+                className="gap-1.5"
+              >
+                <Icon className="size-3.5" />
+                {label}
+                {theme === value && <Check className="size-3.5" />}
+              </Button>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
 
-      <section>
-        <h3 className="text-sm font-medium mb-3">Default workspace</h3>
-        <p className="text-muted-foreground text-xs mb-3">
-          The workspace selected here is remembered across sessions.
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {workspaces.map((ws) => (
-            <Button
-              key={ws}
-              variant={workspace === ws ? "default" : "outline"}
-              size="sm"
-              onClick={() => setWorkspace(ws)}
-            >
-              {ws}
-            </Button>
-          ))}
-        </div>
-      </section>
+      <Card>
+        <CardContent className="space-y-3">
+          <h3 className="text-sm font-medium">Default workspace</h3>
+          <p className="text-muted-foreground text-xs">
+            The workspace selected here is remembered across sessions.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {workspaces.map((ws) => (
+              <Button
+                key={ws}
+                variant={workspace === ws ? "default" : "outline"}
+                size="sm"
+                onClick={() => setWorkspace(ws)}
+              >
+                {ws}
+              </Button>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -144,9 +153,13 @@ function TokensTab() {
     setTimeout(() => setCopied(false), 2000);
   }
 
+  const [installOpen, setInstallOpen] = useState(false);
   const [installCopied, setInstallCopied] = useState(false);
   const installCommand = newToken
     ? `curl -fsSL ${MCP_URL}/install-hook.sh | CONTINUUM_TOKEN=${newToken} bash`
+    : "";
+  const installCommandDisplay = newToken
+    ? `curl -fsSL ${MCP_URL}/install-hook.sh | CONTINUUM_TOKEN=${maskSecret(newToken)} bash`
     : "";
 
   async function copyInstallCommand() {
@@ -160,54 +173,75 @@ function TokensTab() {
 
   return (
     <div className="space-y-6 mt-4">
-      {newToken ? (
+      {newToken && (
         <Card className="border-accent bg-accent/25">
           <CardContent className="space-y-3">
             <p className="text-accent-foreground text-sm font-medium">
-              Copy this token now — it will not be shown again.
+              Copy this token now — it won&apos;t be shown again after you leave this page.
             </p>
             <code className="block text-xs break-all rounded border border-border bg-background/60 p-3 font-mono">
-              {newToken}
+              {maskSecret(newToken)}
             </code>
             <Button onClick={copy}>{copied ? "Copied!" : "Copy to clipboard"}</Button>
+          </CardContent>
+        </Card>
+      )}
 
-            <div className="pt-3 border-t border-accent/40 space-y-2">
-              <p className="text-accent-foreground text-sm font-medium">
-                Optional: auto-context for Claude Code
-              </p>
-              <p className="text-accent-foreground/70 text-xs">
-                Injects relevant memory into every message automatically, instead of relying on
-                Claude to call memory_search itself. Run this in a terminal:
-              </p>
-              <code className="block text-xs break-all rounded border border-border bg-background/60 p-3 font-mono">
-                {installCommand}
+      <Card>
+        <CardContent className="space-y-3">
+          {activeToken ? (
+            <p className="text-sm text-muted-foreground">
+              Active token: <span className="text-foreground">{activeToken.label}</span>{" "}
+              — created {new Date(activeToken.createdAt).toLocaleDateString()}
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground">No active token. Generate one to use Continuum with MCP clients.</p>
+          )}
+          <div className="flex items-center gap-2">
+            <Button onClick={mintToken} disabled={minting}>
+              {minting ? "Generating…" : activeToken ? "Rotate token" : "Generate token"}
+            </Button>
+            <Button variant="outline" onClick={() => setInstallOpen(true)}>
+              Set up auto-context for Claude Code
+            </Button>
+          </div>
+          {mintError && (
+            <p className="text-destructive text-xs mt-2 font-mono">{mintError}</p>
+          )}
+        </CardContent>
+      </Card>
+
+      <Dialog open={installOpen} onOpenChange={setInstallOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Auto-context for Claude Code</DialogTitle>
+            <DialogDescription>
+              Injects relevant memory into every message automatically, instead of relying on
+              Claude to call memory_search itself — scoped to whichever project workspace Claude
+              has already picked for the current directory (falling back to &quot;default&quot;),
+              plus your default workspace so cross-project facts still surface.
+            </DialogDescription>
+          </DialogHeader>
+          {newToken ? (
+            <div className="space-y-3">
+              <code className="block text-xs break-all rounded border border-border bg-muted/40 p-3 font-mono">
+                {installCommandDisplay}
               </code>
               <Button onClick={copyInstallCommand} variant="outline" size="sm">
                 {installCopied ? "Copied!" : "Copy command"}
               </Button>
-            </div>
-          </CardContent>
-        </Card>
-      ) : (
-        <Card>
-          <CardContent className="space-y-3">
-            {activeToken ? (
-              <p className="text-sm text-muted-foreground">
-                Active token: <span className="text-foreground">{activeToken.label}</span>{" "}
-                — created {new Date(activeToken.createdAt).toLocaleDateString()}
+              <p className="text-muted-foreground text-xs">
+                The token above is masked on screen — the copy button places the full working
+                command on your clipboard. Run it in a terminal.
               </p>
-            ) : (
-              <p className="text-sm text-muted-foreground">No active token. Generate one to use Continuum with MCP clients.</p>
-            )}
-            <Button onClick={mintToken} disabled={minting}>
-              {minting ? "Generating…" : activeToken ? "Rotate token" : "Generate token"}
+            </div>
+          ) : (
+            <Button onClick={mintToken} disabled={minting} variant="outline" size="sm">
+              {minting ? "Generating…" : "Generate a token to get the install command"}
             </Button>
-            {mintError && (
-              <p className="text-destructive text-xs mt-2 font-mono">{mintError}</p>
-            )}
-          </CardContent>
-        </Card>
-      )}
+          )}
+        </DialogContent>
+      </Dialog>
 
       {tokens.length > 0 && (
         <div>
@@ -331,11 +365,13 @@ function DangerZoneTab() {
 }
 
 export default function SettingsPage() {
+  const [tab, setTab] = useState("profile");
+
   return (
-    <main className="max-w-3xl mx-auto px-6 py-10">
+    <main className="max-w-4xl mx-auto px-6 py-10">
       <h2 className="text-xl font-semibold mb-6">Settings</h2>
 
-      <Tabs defaultValue="profile">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="profile">Profile</TabsTrigger>
           <TabsTrigger value="preferences">Preferences</TabsTrigger>
