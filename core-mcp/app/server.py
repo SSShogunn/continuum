@@ -154,8 +154,24 @@ bypass of one.
 6. For "what do you know about me?" / "what do you remember?", call `memory_list` first, then
    `memory_search`.
 
-7. If the user wants to organize memory by context (e.g. work vs. personal vs. a specific project),
-   call `memory_list_workspaces` to see what already exists before inventing a new workspace name.
+7. **Default to a project-scoped workspace, not `default`.** For anything tied to a specific
+   codebase or project (its status, decisions, bugs, task context — typically `type=project`),
+   derive a workspace slug from the current project (its repo/directory name, kebab-cased) and
+   pass it explicitly as `workspace` on every call for that entry — don't leave it on `default` by
+   omission. Call `memory_list_workspaces` first and reuse an existing close match (`continuum` vs
+   `continuum-app`) instead of minting a near-duplicate. Reserve `default` for what isn't tied to
+   one project — the user's identity, cross-project preferences, people. If the user asks to
+   organize memory some other way (e.g. work vs. personal instead of per-project), follow that
+   instead.
+
+   If you have local filesystem access (e.g. running inside Claude Code, not the hosted web
+   client), also keep `~/.continuum/workspace-map.json` in sync whenever you settle on a project's
+   workspace: a flat JSON object mapping the exact working-directory path you're running in (as
+   given in your environment context) to the workspace slug — read the existing file if present,
+   set/update the one entry for this directory, and write it back. The passive `UserPromptSubmit`
+   hook (`install-hook.sh`) is intentionally dumb — it only reads this file by cwd, with no
+   project-detection of its own — so this mapping is what lets it auto-scope future messages in
+   this project the same way your own tool calls do.
 
 8. If the user wants to back up, migrate, or move memories between workspaces/accounts/tools, use
    `memory_export`/`memory_import` rather than manually re-saving each entry.
@@ -299,8 +315,12 @@ async def hook_context(request: Request) -> Response:
     query = (body.get("query") or "").strip()
     if not query:
         return JSONResponse({"context": None})
-    owner = auth.compose_owner(access_token.client_id, body.get("workspace", "default"))
-    context = await prompt.build_hook_context(owner, query)
+    workspace = body.get("workspace", "default")
+    owner = auth.compose_owner(access_token.client_id, workspace)
+    extra_owner = (
+        auth.compose_owner(access_token.client_id, "default") if workspace != "default" else None
+    )
+    context = await prompt.build_hook_context(owner, query, extra_owner=extra_owner)
     return JSONResponse({"context": context})
 
 

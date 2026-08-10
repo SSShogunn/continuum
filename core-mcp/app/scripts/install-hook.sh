@@ -65,10 +65,44 @@ except Exception:
 ' <<< "$INPUT")
 [ -n "$PROMPT" ] || exit 0
 
+CWD=$(python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    print(data.get("cwd", ""))
+except Exception:
+    pass
+' <<< "$INPUT")
+
+# Deliberately no project-detection here — the model decides which workspace a
+# project belongs to (see rule 7 in core-mcp/app/server.py's _INSTRUCTIONS) and
+# records that choice in this map, keyed by cwd. The hook just reads it back.
+# Empty/missing entry means the server falls back to "default", same as before.
+WORKSPACE_MAP="$HOME/.continuum/workspace-map.json"
+WORKSPACE=""
+if [ -n "$CWD" ] && [ -f "$WORKSPACE_MAP" ]; then
+  WORKSPACE=$(python3 -c '
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        m = json.load(f)
+    print(m.get(sys.argv[2], ""))
+except Exception:
+    pass
+' "$WORKSPACE_MAP" "$CWD")
+fi
+
 RESPONSE=$(curl -s --max-time 3 \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d "$(python3 -c 'import json,sys; print(json.dumps({"query": sys.argv[1]}))' "$PROMPT")" \
+  -d "$(python3 -c '
+import json, sys
+query, workspace = sys.argv[1], sys.argv[2]
+payload = {"query": query}
+if workspace:
+    payload["workspace"] = workspace
+print(json.dumps(payload))
+' "$PROMPT" "$WORKSPACE")" \
   "$CONTINUUM_URL/hook/context" 2>/dev/null)
 [ -n "$RESPONSE" ] || exit 0
 

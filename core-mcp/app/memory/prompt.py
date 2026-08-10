@@ -48,20 +48,37 @@ async def build_selection(owner: str, names: list[str]) -> str:
     return "# Continuum Memory Export — selected entries\n\n" + _memory_section(entries)
 
 
-async def build_hook_context(owner: str, query: str, top_k: int = 3) -> str | None:
+async def build_hook_context(
+    owner: str, query: str, top_k: int = 3, extra_owner: str | None = None
+) -> str | None:
     """Compact, gated context for automatic per-message injection (e.g. a
     UserPromptSubmit hook) — returns None when nothing clears the relevance gate,
     so irrelevant turns inject nothing. Deliberately lean (names/descriptions and
     fact lines, not full memory content) since this rides on every message;
-    the model can call memory_search/memory_fact_search itself for full detail."""
+    the model can call memory_search/memory_fact_search itself for full detail.
+
+    `extra_owner` (e.g. the account's `default` workspace when `owner` is a
+    project-scoped one) is merged in so switching to a project workspace can't
+    hide cross-project facts like identity/preferences that still live in `default`."""
+    owners = [owner] if not extra_owner or extra_owner == owner else [owner, extra_owner]
+
     query_embedding = await embed(query[:500])
-    if not await search.is_relevant(owner, query_embedding):
+    relevance = await asyncio.gather(*(search.is_relevant(o, query_embedding) for o in owners))
+    owners = [o for o, ok in zip(owners, relevance) if ok]
+    if not owners:
         return None
 
-    entries, facts = await asyncio.gather(
-        memory.search(query, top_k=top_k, owner=owner),
-        search.fact_search(owner, query, top_k=top_k * 2),
-    )
+    results = await asyncio.gather(*(
+        asyncio.gather(memory.search(query, top_k=top_k, owner=o), search.fact_search(o, query, top_k=top_k * 2))
+        for o in owners
+    ))
+    entries: dict[str, dict] = {}
+    facts: list[dict] = []
+    for owner_entries, owner_facts in results:
+        for e in owner_entries:
+            entries.setdefault(e["name"], e)
+        facts.extend(owner_facts)
+    entries = list(entries.values())
     if not entries and not facts:
         return None
 

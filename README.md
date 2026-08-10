@@ -26,7 +26,12 @@ themselves, just connect a client to the hosted instance:
    one-line `curl | bash` install command after generating a token. It wires up a
    `UserPromptSubmit` hook that injects relevant memory into every message automatically, instead
    of relying on Claude to decide to call `memory_search` (see "Auto-injected context" below). The
-   Connections page also has the copy-paste connect commands above.
+   hook itself does no project-detection — it auto-scopes by reading back whatever workspace the
+   model already decided on for the current directory (see below), and still merges in `default`
+   so cross-project facts (identity, preferences) keep showing up everywhere. The Connections page
+   also has the copy-paste connect commands above.
+   - Already installed from an older version? Re-run the install command — it overwrites the hook
+     script in place (idempotent) and is the only way an existing install picks up this behavior.
 
 Both connection paths (steps 2–3) go through OAuth — no token to copy/paste. The manual token used
 in step 4 exists specifically for non-interactive automation (the hook script has no browser to
@@ -85,6 +90,19 @@ dropped into a host's per-message context hook — e.g. a Claude Code `UserPromp
 `GET /install-hook.sh` (`core-mcp/app/scripts/install-hook.sh`) serves a self-contained installer
 for exactly that hook — idempotent, safe to re-run, merges into `~/.claude/settings.json` rather
 than overwriting it.
+
+Project-scoping is deliberately kept out of the hook script — it stays a dumb lookup, not a second
+place that has to guess what project it's in. The model owns that decision: per rule 7 in
+`core-mcp/app/server.py`'s `_INSTRUCTIONS`, whenever it settles on a workspace for the project it's
+working in (checking `memory_list_workspaces` first, same as any other project-scoped tool call),
+it also read-modify-writes `~/.continuum/workspace-map.json` — a flat `{cwd: workspace}` object —
+with an entry for the current working directory. The installed hook reads `cwd` off its own stdin
+payload and looks it up in that same file; no entry means it omits `workspace` and the server falls
+back to `default`, same as before. `/hook/context` queries the resolved workspace plus the
+account's `default` workspace and merges the two (deduped by memory name), so a project-scoped
+workspace can never hide cross-project facts that still live in `default`. Net effect: the first
+message in a brand-new project session is unscoped (nothing in the map yet), and every message
+after the model has acted once is scoped without the hook doing any detection of its own.
 
 ## Running it
 
