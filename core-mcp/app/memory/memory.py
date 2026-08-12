@@ -6,6 +6,7 @@ from ..infra import pg
 from . import embeddings, kg
 from .embeddings import embed
 from .search import rrf_fuse
+from .taxonomy import normalize_recall, recall_tier
 
 logger = logging.getLogger("continuum.memory")
 
@@ -20,83 +21,108 @@ async def save(
     content: str,
     owner: str = "",
     supersedes: list[str] | None = None,
+    recall: str | None = None,
 ) -> dict:
+    tier = normalize_recall(recall, type)
     embedding = await embed(f"{description}\n\n{content}")
     now = datetime.now(timezone.utc)
     async with pg.pool().acquire() as conn:
         async with conn.transaction():
             await conn.execute(
                 """
-                INSERT INTO memory (owner, name, type, description, content, embedding, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                INSERT INTO memory (owner, name, type, recall, description, content, embedding, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                 ON CONFLICT (owner, name) DO UPDATE SET
                     type        = EXCLUDED.type,
+                    recall      = EXCLUDED.recall,
                     description = EXCLUDED.description,
                     content     = EXCLUDED.content,
                     embedding   = EXCLUDED.embedding,
                     updated_at  = EXCLUDED.updated_at,
                     archived_at = NULL
                 """,
-                owner, name, type, description, content, embedding, now, now,
+                owner, name, type, tier, description, content, embedding, now, now,
             )
             if supersedes:
                 await conn.execute(
                     "UPDATE memory SET archived_at = $1 WHERE owner = $2 AND name = ANY($3::text[])",
                     now, owner, supersedes,
                 )
-    combined = f"{description}\n\n{content}"
-    kg.schedule_extract(owner, name, combined, now.isoformat())
-    return {"name": name, "type": type, "description": description, "updated_at": now.isoformat()}
+    if tier != "always":
+        kg.schedule_extract(owner, name, f"{description}\n\n{content}", now.isoformat())
+    return {
+        "name": name,
+        "type": type,
+        "recall": tier,
+        "description": description,
+        "updated_at": now.isoformat(),
+    }
 
 
-async def search(query: str, top_k: int = 5, type: str | None = None, owner: str = "") -> list[dict]:
+async def set_recall(name: str, recall: str, owner: str = "") -> str | None:
+    """Move an existing entry between recall tiers without re-saving it through a
+    model. Returns the tier actually applied, or None if there was no such entry.
+    Rejects an unrecognized tier rather than falling back to a default — silently
+    demoting a standing rule to relevance-gated is exactly the failure this whole
+    split exists to prevent."""
+    tier = recall_tier(recall)
+    if tier is None:
+        raise ValueError(f"Unknown recall tier '{recall}' (expected always, relevance, or manual)")
+    async with pg.pool().acquire() as conn:
+        result = await conn.execute(
+            "UPDATE memory SET recall = $1 WHERE owner = $2 AND name = $3",
+            tier, owner, name,
+        )
+    return None if result == "UPDATE 0" else tier
+
+
+async def search(
+    query: str,
+    top_k: int = 5,
+    type: str | None = None,
+    owner: str = "",
+    recall_in: list[str] | None = None,
+) -> list[dict]:
+    """Hybrid (semantic + lexical) memory search. `recall_in` restricts the result
+    to given recall tiers — the auto-injection path passes ["relevance"] so
+    always-on directives aren't ranked twice and `manual` entries stay opted out;
+    explicit searches leave it unset and see every tier."""
     query_embedding = await embed(query)
     pool_size = top_k * 4
+
+    filters = ["owner = $1", "archived_at IS NULL"]
+    params: list = [owner]
+    if type:
+        params.append(type)
+        filters.append(f"type = ${len(params)}")
+    if recall_in:
+        params.append(list(recall_in))
+        filters.append(f"recall = ANY(${len(params)}::text[])")
+    where = " AND ".join(filters)
+    n = len(params)
+
     async with pg.pool().acquire() as conn:
-        if type:
-            semantic = await conn.fetch(
-                """
-                SELECT name, type, description, content, updated_at
-                FROM memory
-                WHERE owner = $2 AND type = $3 AND archived_at IS NULL
-                ORDER BY embedding <=> $1
-                LIMIT $4
-                """,
-                query_embedding, owner, type, pool_size,
-            )
-            lexical = await conn.fetch(
-                """
-                SELECT name, type, description, content, updated_at
-                FROM memory
-                WHERE owner = $1 AND type = $2 AND archived_at IS NULL
-                  AND content_tsv @@ plainto_tsquery('english', $3)
-                ORDER BY ts_rank(content_tsv, plainto_tsquery('english', $3)) DESC
-                LIMIT $4
-                """,
-                owner, type, query, pool_size,
-            )
-        else:
-            semantic = await conn.fetch(
-                """
-                SELECT name, type, description, content, updated_at
-                FROM memory
-                WHERE owner = $2 AND archived_at IS NULL
-                ORDER BY embedding <=> $1
-                LIMIT $3
-                """,
-                query_embedding, owner, pool_size,
-            )
-            lexical = await conn.fetch(
-                """
-                SELECT name, type, description, content, updated_at
-                FROM memory
-                WHERE owner = $1 AND archived_at IS NULL
-                  AND content_tsv @@ plainto_tsquery('english', $2)
-                ORDER BY ts_rank(content_tsv, plainto_tsquery('english', $2)) DESC
-                LIMIT $3
-                """,
-                owner, query, pool_size,
-            )
+        semantic = await conn.fetch(
+            f"""
+            SELECT name, type, recall, description, content, updated_at
+            FROM memory
+            WHERE {where}
+            ORDER BY embedding <=> ${n + 1}
+            LIMIT ${n + 2}
+            """,
+            *params, query_embedding, pool_size,
+        )
+        lexical = await conn.fetch(
+            f"""
+            SELECT name, type, recall, description, content, updated_at
+            FROM memory
+            WHERE {where}
+              AND content_tsv @@ plainto_tsquery('english', ${n + 1})
+            ORDER BY ts_rank(content_tsv, plainto_tsquery('english', ${n + 1})) DESC
+            LIMIT ${n + 2}
+            """,
+            *params, query, pool_size,
+        )
 
     scores, rows = rrf_fuse((semantic, lexical), key="name")
 
@@ -118,6 +144,7 @@ async def search(query: str, top_k: int = 5, type: str | None = None, owner: str
         results.append({
             "name": row["name"],
             "type": row["type"],
+            "recall": row["recall"],
             "description": row["description"],
             "content": row["content"],
             "score": final_score,
@@ -126,18 +153,39 @@ async def search(query: str, top_k: int = 5, type: str | None = None, owner: str
     return results
 
 
+async def list_directives(owner: str = "") -> list[dict]:
+    """Always-on entries, newest first — the tier the auto-context hook injects
+    verbatim on every message regardless of topic."""
+    async with pg.pool().acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT name, type, description, content, updated_at FROM memory "
+            "WHERE owner = $1 AND recall = 'always' AND archived_at IS NULL "
+            "ORDER BY updated_at DESC",
+            owner,
+        )
+    return [
+        {
+            "name": row["name"],
+            "type": row["type"],
+            "description": row["description"],
+            "content": row["content"],
+        }
+        for row in rows
+    ]
+
+
 async def list_entries(type: str | None = None, owner: str = "", include_archived: bool = False) -> list[dict]:
     archived_clause = "" if include_archived else "AND archived_at IS NULL"
     async with pg.pool().acquire() as conn:
         if type:
             rows = await conn.fetch(
-                f"SELECT name, type, description, updated_at, archived_at FROM memory "
+                f"SELECT name, type, recall, description, updated_at, archived_at FROM memory "
                 f"WHERE owner = $1 AND type = $2 {archived_clause} ORDER BY updated_at DESC",
                 owner, type,
             )
         else:
             rows = await conn.fetch(
-                f"SELECT name, type, description, updated_at, archived_at FROM memory "
+                f"SELECT name, type, recall, description, updated_at, archived_at FROM memory "
                 f"WHERE owner = $1 {archived_clause} ORDER BY updated_at DESC",
                 owner,
             )
@@ -145,6 +193,7 @@ async def list_entries(type: str | None = None, owner: str = "", include_archive
         {
             "name": row["name"],
             "type": row["type"],
+            "recall": row["recall"],
             "description": row["description"],
             "updated_at": row["updated_at"].isoformat() if hasattr(row["updated_at"], "isoformat") else row["updated_at"],
             "archived_at": row["archived_at"].isoformat() if row["archived_at"] else None,
@@ -174,7 +223,7 @@ async def restore(name: str, owner: str = "") -> bool:
 async def list_full(owner: str = "") -> list[dict]:
     async with pg.pool().acquire() as conn:
         rows = await conn.fetch(
-            "SELECT name, type, description, content, created_at, updated_at, archived_at FROM memory "
+            "SELECT name, type, recall, description, content, created_at, updated_at, archived_at FROM memory "
             "WHERE owner = $1 ORDER BY updated_at DESC",
             owner,
         )
@@ -182,6 +231,7 @@ async def list_full(owner: str = "") -> list[dict]:
         {
             "name": row["name"],
             "type": row["type"],
+            "recall": row["recall"],
             "description": row["description"],
             "content": row["content"],
             "created_at": row["created_at"].isoformat() if hasattr(row["created_at"], "isoformat") else row["created_at"],
@@ -195,7 +245,7 @@ async def list_full(owner: str = "") -> list[dict]:
 async def list_by_names(names: list[str], owner: str = "") -> list[dict]:
     async with pg.pool().acquire() as conn:
         rows = await conn.fetch(
-            "SELECT name, type, description, content, updated_at FROM memory "
+            "SELECT name, type, recall, description, content, updated_at FROM memory "
             "WHERE owner = $1 AND name = ANY($2::text[]) ORDER BY updated_at DESC",
             owner, names,
         )
@@ -203,6 +253,7 @@ async def list_by_names(names: list[str], owner: str = "") -> list[dict]:
         {
             "name": row["name"],
             "type": row["type"],
+            "recall": row["recall"],
             "description": row["description"],
             "content": row["content"],
             "updated_at": row["updated_at"].isoformat() if hasattr(row["updated_at"], "isoformat") else row["updated_at"],
@@ -283,6 +334,16 @@ async def get_memory_stats(clerk_id: str) -> dict:
             """,
             prefix,
         )
+        by_recall = await conn.fetch(
+            """
+            SELECT recall, COUNT(*) AS count
+            FROM memory
+            WHERE owner LIKE $1 AND archived_at IS NULL
+            GROUP BY recall
+            ORDER BY count DESC
+            """,
+            prefix,
+        )
         by_owner = await conn.fetch(
             """
             SELECT owner, COUNT(*) AS count
@@ -306,6 +367,7 @@ async def get_memory_stats(clerk_id: str) -> dict:
     return {
         "total_entries": total,
         "by_type": [{"type": r["type"], "count": r["count"]} for r in by_type],
+        "by_recall": [{"recall": r["recall"], "count": r["count"]} for r in by_recall],
         "by_workspace": [
             {"workspace": r["owner"][prefix_len:], "count": r["count"]} for r in by_owner
         ],

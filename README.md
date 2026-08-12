@@ -72,6 +72,7 @@ indexes — no in-Python similarity loop.
 | `check_url` | Verify a URL actually resolves — catches dead links and hallucinated URLs. |
 | `verify_quote` | Check whether a quoted string appears verbatim on a page — catches fabricated/misremembered citations, fuzzy-matches (`rapidfuzz`) the closest passage if not exact. |
 | `memory_save` / `memory_search` / `memory_list` / `memory_delete` | Persistent memory CRUD, per-user (scoped by JWT `owner`). |
+| `memory_set_recall` | Move an existing entry between recall tiers (`always` / `relevance` / `manual`) without rewriting it. |
 | `memory_fact_search` | Semantic search over extracted atomic facts (see above). |
 
 Plus an MCP resource (`memory://context` — full memory context; not auto-loaded by most clients,
@@ -84,12 +85,31 @@ Because retrieval above is entirely model-invoked — the connected LLM has to d
 that wants relevant memory injected into *every* message without relying on that decision.
 Bearer-JWT-gated (same manual/OAuth tokens the MCP transport already accepts — mint one from the
 dashboard's Settings page), it embeds the query once, gates on a cheap top-1 cosine check so
-irrelevant messages inject nothing (`{"context": null}`), and otherwise returns a compact,
-progressive-disclosure blob (fact lines + memory names/descriptions, not full content) meant to be
+irrelevant messages inject nothing (`{"context": null}`), and otherwise returns a blob meant to be
 dropped into a host's per-message context hook — e.g. a Claude Code `UserPromptSubmit` hook.
 `GET /install-hook.sh` (`core-mcp/app/scripts/install-hook.sh`) serves a self-contained installer
 for exactly that hook — idempotent, safe to re-run, merges into `~/.claude/settings.json` rather
 than overwriting it.
+
+What gets injected is decided by a memory's **recall tier**, a column independent of its subject
+`type`, because the two axes fail in opposite directions:
+
+| tier | behavior | rendered as |
+| --- | --- | --- |
+| `always` | Bypasses the relevance gate and the similarity ranking entirely — injected on every message. | Full rule text, newest first, under a char budget (`CONTINUUM_HOOK_DIRECTIVE_*`); anything past the budget degrades to a one-liner rather than being dropped. |
+| `relevance` (default) | Gated and ranked as before. | Compact progressive disclosure — fact lines + memory names/descriptions, not full content. |
+| `manual` | Never auto-injected. | — (explicit `memory_search`/`memory_list` only) |
+
+A standing behavioral rule ("never do X unless explicitly asked") is useless if it only surfaces
+when the message happens to embed near it, and equally useless if it surfaces as a bare title — so
+`always` entries carry their body. Contextual facts have the opposite problem (they'd bloat every
+prompt), so they stay lean and the model calls `memory_search` for detail. Only `relevance`-tier
+rows can open the gate: an always-on rule that tripped it would drag unrelated memories in on every
+message it embeds near. Always-on entries also skip knowledge-graph extraction — a rule isn't a
+fact about an entity, and extracting one just pollutes the graph. The dashboard's Memory page flags
+entries whose text reads like a rule but sits on a lower tier (imperative statements — "never …",
+"unless explicitly asked") and offers one-click promotion; nothing is ever reclassified
+automatically.
 
 Project-scoping is deliberately kept out of the hook script — it stays a dumb lookup, not a second
 place that has to guess what project it's in. The model owns that decision: per rule 7 in

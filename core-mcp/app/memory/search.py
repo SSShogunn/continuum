@@ -76,12 +76,17 @@ async def graph_search(owner: str, entity: str) -> dict | None:
 async def is_relevant(owner: str, query_embedding: list[float], gate: float = HOOK_RELEVANCE_GATE) -> bool:
     """Cheap top-1 cosine check used to gate auto-injected context — cuts noise on
     messages with nothing worth surfacing (small talk, unrelated topics) without
-    paying for a full hybrid search first."""
+    paying for a full hybrid search first.
+
+    Only `relevance`-tier memories can open the gate: always-on directives are
+    injected regardless, so letting one of them trip the gate would drag in
+    unrelated memories on every message it happens to embed near, and `manual`
+    entries are explicitly opted out of auto-injection."""
     async with pg.pool().acquire() as conn:
         memory_score = await conn.fetchval(
             """
             SELECT 1 - (embedding <=> $1) FROM memory
-            WHERE owner = $2 AND archived_at IS NULL
+            WHERE owner = $2 AND archived_at IS NULL AND recall = 'relevance'
             ORDER BY embedding <=> $1 LIMIT 1
             """,
             query_embedding, owner,

@@ -12,6 +12,21 @@ class ImportRequest(BaseModel):
     memories: list[dict]
 
 
+class RecallRequest(BaseModel):
+    name: str
+    recall: str
+    workspace: str = "default"
+
+
+class SaveRequest(BaseModel):
+    name: str
+    type: str = "note"
+    description: str = ""
+    content: str
+    recall: str = "relevance"
+    workspace: str = "default"
+
+
 @router.get("")
 async def get_memory(workspace: str = "default", user: dict = Depends(get_current_user)):
     url = f"{settings.CONTINUUM_CORE_BASE_URL}/internal/memory"
@@ -69,6 +84,56 @@ async def get_graph(workspace: str = "default", user: dict = Depends(get_current
         )
     if resp.status_code != 200:
         raise HTTPException(status_code=502, detail="Failed to fetch graph from core")
+    return resp.json()
+
+
+@router.post("")
+async def save_memory(body: SaveRequest, user: dict = Depends(get_current_user)):
+    url = f"{settings.CONTINUUM_CORE_BASE_URL}/internal/memory/save"
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            url,
+            json={**body.model_dump(), "clerk_id": user["sub"]},
+            headers={"X-Internal-Secret": settings.CONTINUUM_INTERNAL_SECRET},
+            timeout=30.0,
+        )
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail="Failed to save memory")
+    return resp.json()
+
+
+@router.get("/review")
+async def get_review_candidates(workspace: str = "default", user: dict = Depends(get_current_user)):
+    url = f"{settings.CONTINUUM_CORE_BASE_URL}/internal/memory/review"
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            url,
+            params={"clerk_id": user["sub"], "workspace": workspace},
+            headers={"X-Internal-Secret": settings.CONTINUUM_INTERNAL_SECRET},
+            timeout=15.0,
+        )
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail="Failed to fetch review candidates from core")
+    return resp.json()
+
+
+@router.post("/recall")
+async def set_recall(body: RecallRequest, user: dict = Depends(get_current_user)):
+    url = f"{settings.CONTINUUM_CORE_BASE_URL}/internal/memory/recall"
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            url,
+            json={
+                "clerk_id": user["sub"],
+                "workspace": body.workspace,
+                "name": body.name,
+                "recall": body.recall,
+            },
+            headers={"X-Internal-Secret": settings.CONTINUUM_INTERNAL_SECRET},
+            timeout=10.0,
+        )
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail="Failed to update recall tier")
     return resp.json()
 
 

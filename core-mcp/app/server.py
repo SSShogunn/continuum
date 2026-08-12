@@ -11,7 +11,7 @@ from typing import Any
 from . import auth
 from .infra import browser_pool, db, pg
 from .infra import redis as redis_infra
-from .memory import kg, memory, prompt, search
+from .memory import kg, memory, prompt, search, taxonomy
 import html2text
 import httpx
 import litellm
@@ -176,6 +176,23 @@ bypass of one.
 8. If the user wants to back up, migrate, or move memories between workspaces/accounts/tools, use
    `memory_export`/`memory_import` rather than manually re-saving each entry.
 
+9. **Set a `recall` tier, not just a `type`.** Every entry has two independent axes: `type` is what
+   it's *about* (user, preference, project, reference); `recall` is *how it reaches you*. Pick both.
+    - `recall="always"` — a standing behavioral rule: how you must act going forward, not a fact
+      about the user's world (e.g. "never call chromium-cli/Playwright to self-verify UI unless
+      explicitly asked", "always respond in English only"). The auto-context hook (`/hook/context`)
+      injects these verbatim on every message regardless of topic, bypassing the relevance gate and
+      the similarity ranking everything else goes through. Keep `content` to the rule plus its
+      *why* — it costs prompt space on every single turn. Reserve it for rules that hold
+      unconditionally; if it only matters sometimes, it's a `relevance` preference instead.
+    - `recall="relevance"` (default) — contextual facts, surfaced only when the current message is
+      semantically close to them.
+    - `recall="manual"` — bulky or noisy material that shouldn't ride every prompt; returned only
+      on an explicit `memory_search`/`memory_list`.
+   Never bury a standing rule inside a `relevance` blob — a rule that only surfaces when the topic
+   happens to match isn't being enforced. Save it as its own `always` entry, and pass `supersedes`
+   if that leaves the original redundant.
+
 ## Naming convention
 kebab-case, descriptive: `user-role`, `project-continuum-status`, `preference-coding-style`,
 `person-alice-context`.
@@ -326,6 +343,74 @@ async def hook_context(request: Request) -> Response:
     return JSONResponse({"context": context})
 
 
+@mcp.custom_route("/internal/memory/save", methods=["POST"])
+async def internal_memory_save(request: Request) -> Response:
+    """Create or update an entry from the dashboard, so memory is editable by hand
+    and not only through a model's tool call. Goes through the same `memory.save`
+    path as the MCP tool — re-embeds, re-schedules graph extraction, unarchives —
+    so a hand-edited entry behaves identically to a model-written one."""
+    if not _check_internal_secret(request):
+        return Response("Forbidden", status_code=403)
+    body = await request.json()
+    owner = auth.compose_owner(body.get("clerk_id", ""), body.get("workspace", "default"))
+    name = (body.get("name") or "").strip()
+    content = body.get("content") or ""
+    if not name or not content:
+        return Response("name and content are required", status_code=400)
+    record = await memory.save(
+        name,
+        (body.get("type") or "note").strip(),
+        (body.get("description") or content[:200]).strip(),
+        content,
+        owner=owner,
+        recall=body.get("recall"),
+    )
+    return JSONResponse(record)
+
+
+@mcp.custom_route("/internal/memory/recall", methods=["POST"])
+async def internal_memory_set_recall(request: Request) -> Response:
+    if not _check_internal_secret(request):
+        return Response("Forbidden", status_code=403)
+    body = await request.json()
+    owner = auth.compose_owner(body.get("clerk_id", ""), body.get("workspace", "default"))
+    try:
+        tier = await memory.set_recall(body["name"], body.get("recall", ""), owner=owner)
+    except ValueError as exc:
+        return Response(str(exc), status_code=400)
+    if tier is None:
+        return Response("No such memory entry", status_code=404)
+    return JSONResponse({"name": body["name"], "recall": tier})
+
+
+@mcp.custom_route("/internal/memory/review", methods=["GET"])
+async def internal_memory_review(request: Request) -> Response:
+    """Entries that read like standing rules but aren't filed as ones — a
+    relevance/manual-tier memory whose text contains imperative statements
+    ("never …", "always …", "unless explicitly asked"). Surfaced in the dashboard
+    for the user to promote by hand; deliberately never reclassified on its own,
+    since promoting something into every prompt is the user's call."""
+    if not _check_internal_secret(request):
+        return Response("Forbidden", status_code=403)
+    clerk_id = request.query_params.get("clerk_id", "")
+    workspace = request.query_params.get("workspace", "default")
+    owner = auth.compose_owner(clerk_id, workspace)
+
+    candidates = []
+    for entry in await memory.list_full(owner):
+        if entry.get("recall") == "always" or entry.get("archived_at"):
+            continue
+        statements = taxonomy.rule_like_statements(f"{entry['description']}\n{entry['content']}")
+        if statements:
+            candidates.append({
+                "name": entry["name"],
+                "type": entry["type"],
+                "recall": entry.get("recall") or "relevance",
+                "statements": statements,
+            })
+    return JSONResponse({"workspace": workspace, "candidates": candidates})
+
+
 @mcp.custom_route("/internal/memory/delete", methods=["POST"])
 async def internal_memory_delete(request: Request) -> Response:
     if not _check_internal_secret(request):
@@ -357,6 +442,7 @@ async def internal_memory_import(request: Request) -> Response:
             entry.get("description") or content[:200],
             content,
             owner=owner,
+            recall=entry.get("recall"),
         )
         imported += 1
 
@@ -866,11 +952,14 @@ async def memory_save(
     content: str,
     workspace: str = "default",
     supersedes: list[str] | None = None,
+    recall: str | None = None,
 ) -> str:
-    """Save or update a persistent memory entry (e.g. facts about the user, their preferences, or ongoing project context) so it can be recalled later across sessions via memory_search. `name` is a unique slug — saving again with the same name overwrites the existing entry. `type` categorizes the entry (e.g. user, preference, project, reference). `workspace` namespaces the entry (e.g. work, personal) — defaults to "default". `supersedes` is a list of existing memory names that this entry replaces — they get archived (hidden from search/list, not deleted) instead of left to compete on similarity forever."""
+    """Save or update a persistent memory entry (e.g. facts about the user, their preferences, or ongoing project context) so it can be recalled later across sessions via memory_search. `name` is a unique slug — saving again with the same name overwrites the existing entry. `type` categorizes the subject (e.g. user, preference, project, reference). `recall` controls delivery, independently of `type`: "always" for a standing behavioral rule that must be injected into every message regardless of topic ("never do X unless asked"), "relevance" (the default) for contextual facts surfaced only when the message is semantically close, "manual" for bulky material that should never be auto-injected. `workspace` namespaces the entry (e.g. work, personal) — defaults to "default". `supersedes` is a list of existing memory names that this entry replaces — they get archived (hidden from search/list, not deleted) instead of left to compete on similarity forever."""
     owner = auth.scoped_owner(workspace)
-    record = await memory.save(name, type, description, content, owner=owner, supersedes=supersedes)
-    return f"Saved memory '{record['name']}' (type={record['type']})."
+    record = await memory.save(
+        name, type, description, content, owner=owner, supersedes=supersedes, recall=recall
+    )
+    return f"Saved memory '{record['name']}' (type={record['type']}, recall={record['recall']})."
 
 
 @mcp.tool
@@ -887,7 +976,7 @@ async def memory_search(query: str, top_k: int = 5, type: str | None = None, wor
     if not results:
         return "No memory entries found."
     blocks = [
-        f"## {r['name']} (type={r['type']}, score={r['score']:.3f})\n{r['description']}\n\n{r['content']}"
+        f"## {r['name']} (type={r['type']}, recall={r['recall']}, score={r['score']:.3f})\n{r['description']}\n\n{r['content']}"
         for r in results
     ]
     return "\n\n---\n\n".join(blocks)
@@ -932,16 +1021,30 @@ async def memory_graph_search(entity: str, workspace: str = "default") -> str:
 
 @mcp.tool
 async def memory_list(type: str | None = None, workspace: str = "default", include_archived: bool = False) -> str:
-    """List all saved memory entries (name, type, description, last updated) without their full content. Optionally filter by `type`. `workspace` scopes the listing — defaults to "default". Set `include_archived=True` to also show entries archived via `supersedes` or `memory_archive`."""
+    """List all saved memory entries (name, type, recall tier, description, last updated) without their full content. Optionally filter by `type`. `workspace` scopes the listing — defaults to "default". Set `include_archived=True` to also show entries archived via `supersedes` or `memory_archive`."""
     owner = auth.scoped_owner(workspace)
     entries = await memory.list_entries(type=type, owner=owner, include_archived=include_archived)
     if not entries:
         return "No memory entries found."
     return "\n".join(
         f"- {e['name']} [{e['type']}]: {e['description']} (updated {e['updated_at']})"
+        + (f" [recall={e['recall']}]" if e.get("recall") not in (None, "relevance") else "")
         + (f" (archived {e['archived_at']})" if e.get("archived_at") else "")
         for e in entries
     )
+
+
+@mcp.tool
+async def memory_set_recall(name: str, recall: str, workspace: str = "default") -> str:
+    """Move an existing memory between recall tiers without rewriting it — "always" (a standing rule injected into every message regardless of topic), "relevance" (the default; surfaced only when the current message is semantically close), or "manual" (never auto-injected, only returned by an explicit search). Use this when an entry was filed at the wrong tier — e.g. a standing rule saved as an ordinary preference that therefore only surfaces by luck. `workspace` scopes the lookup — defaults to "default"."""
+    owner = auth.scoped_owner(workspace)
+    try:
+        tier = await memory.set_recall(name, recall, owner=owner)
+    except ValueError as exc:
+        raise ToolError(str(exc))
+    if tier is None:
+        raise ToolError(f"No memory entry named '{name}' in workspace '{workspace}'.")
+    return f"Memory '{name}' now has recall={tier}."
 
 
 @mcp.tool
@@ -1038,6 +1141,7 @@ async def memory_import(data: str, workspace: str = "default") -> str:
             entry.get("description") or content[:200],
             content,
             owner=owner,
+            recall=entry.get("recall"),
         )
         imported += 1
 
