@@ -25,7 +25,8 @@ async def get_current_user(request: Request) -> dict:
 
 
 async def require_admin(user: dict = Depends(get_current_user)) -> dict:
-    if not user.get("public_metadata", {}).get("isAdmin"):
+    clerk_user = await _clerk.users.get_async(user_id=user["sub"])
+    if not (clerk_user.public_metadata or {}).get("isAdmin"):
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
 
