@@ -1,6 +1,7 @@
-import { Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 import { ThemeProvider } from "@/lib/theme-context";
 import { RequireAuth } from "@/components/require-auth";
+import { useOnboarding } from "@/lib/onboarding-context";
 import Home from "@/pages/Home";
 import SignIn from "@/pages/SignIn";
 import SignUp from "@/pages/SignUp";
@@ -36,6 +37,13 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with
 the finish review, the verdict, and DESIGN.md.
 -->`;
 
+function DashboardIndex() {
+  const { isNewUser, loading } = useOnboarding();
+  if (loading) return null;
+  if (isNewUser) return <Navigate to="/dashboard/connections" replace />;
+  return <Dashboard />;
+}
+
 export default function App() {
   return (
     <ThemeProvider>
@@ -48,7 +56,7 @@ export default function App() {
         <Route path="/oauth-connect" element={<OAuthConnect />} />
         <Route element={<RequireAuth />}>
           <Route path="/dashboard" element={<DashboardLayout />}>
-            <Route index element={<Dashboard />} />
+            <Route index element={<DashboardIndex />} />
             <Route path="activity" element={<Activity />} />
             <Route path="memory" element={<Memory />} />
             <Route path="memory-graph" element={<MemoryGraph />} />

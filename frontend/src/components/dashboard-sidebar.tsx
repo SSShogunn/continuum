@@ -37,21 +37,24 @@ import {
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ContinuumMark } from "@/components/continuum-mark";
+import { useOnboarding } from "@/lib/onboarding-context";
 
 const NAV_LINKS = [
-  { href: "/dashboard", label: "Stats", icon: BarChart3 },
-  { href: "/dashboard/activity", label: "Activity", icon: Activity },
-  { href: "/dashboard/memory", label: "Memory", icon: Database },
-  { href: "/dashboard/memory-graph", label: "Graph", icon: Share2 },
-  { href: "/dashboard/export", label: "Export", icon: FileOutput },
-  { href: "/dashboard/connections", label: "Connections", icon: Plug },
-  { href: "/dashboard/admin", label: "Admin", icon: ShieldCheck },
+  { href: "/dashboard", label: "Stats", icon: BarChart3, gated: true, adminOnly: false },
+  { href: "/dashboard/activity", label: "Activity", icon: Activity, gated: true, adminOnly: false },
+  { href: "/dashboard/memory", label: "Memory", icon: Database, gated: true, adminOnly: false },
+  { href: "/dashboard/memory-graph", label: "Graph", icon: Share2, gated: true, adminOnly: false },
+  { href: "/dashboard/export", label: "Export", icon: FileOutput, gated: true, adminOnly: false },
+  { href: "/dashboard/connections", label: "Connections", icon: Plug, gated: false, adminOnly: false },
+  { href: "/dashboard/admin", label: "Admin", icon: ShieldCheck, gated: false, adminOnly: true },
 ];
 
 export function DashboardSidebar() {
   const { pathname } = useLocation();
   const { user } = useUser();
   const { signOut } = useClerk();
+  const { isNewUser } = useOnboarding();
+  const isAdmin = Boolean((user?.publicMetadata as { isAdmin?: boolean } | undefined)?.isAdmin);
 
   return (
     <Sidebar collapsible="icon">
@@ -77,6 +80,24 @@ export function DashboardSidebar() {
                   link.href === "/dashboard"
                     ? pathname === "/dashboard"
                     : pathname.startsWith(link.href);
+                const lockedForAdmin = link.adminOnly && !isAdmin;
+                const disabled = (link.gated && isNewUser) || lockedForAdmin;
+
+                if (disabled) {
+                  return (
+                    <SidebarMenuItem key={link.href}>
+                      <SidebarMenuButton
+                        disabled
+                        tooltip={lockedForAdmin ? "Admin access required" : "Connect a client first"}
+                        className="relative cursor-not-allowed opacity-50"
+                      >
+                        <link.icon className="relative" />
+                        <span className="relative">{link.label}</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                }
+
                 return (
                   <SidebarMenuItem key={link.href}>
                     <SidebarMenuButton
@@ -94,7 +115,15 @@ export function DashboardSidebar() {
                           />
                         )}
                         <link.icon className="relative" />
-                        <span className="relative">{link.label}</span>
+                        <span className="relative flex items-center gap-1.5">
+                          {link.label}
+                          {link.href === "/dashboard/connections" && isNewUser && (
+                            <span
+                              className="size-1.5 rounded-full bg-primary animate-pulse"
+                              aria-label="Start here"
+                            />
+                          )}
+                        </span>
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
