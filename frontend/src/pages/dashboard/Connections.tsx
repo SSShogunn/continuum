@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 import { useApiClient } from "@/lib/api-client";
+import { useOnboarding } from "@/lib/onboarding-context";
+import { maskSecret } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -79,12 +82,21 @@ function clientLabel(conn: Connection) {
 
 export default function ConnectionsPage() {
   const api = useApiClient();
+  const { refresh: refreshOnboarding } = useOnboarding();
   const [connections, setConnections] = useState<Connection[]>([]);
   const [manualTokens, setManualTokens] = useState<ManualToken[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pendingDisconnect, setPendingDisconnect] = useState<Connection | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
+
+  const [hookEnabled, setHookEnabled] = useState<boolean | null>(null);
+  const [hookToggling, setHookToggling] = useState(false);
+  const [newToken, setNewToken] = useState<string | null>(null);
+  const [minting, setMinting] = useState(false);
+  const [mintError, setMintError] = useState<string | null>(null);
+  const [installOpen, setInstallOpen] = useState(false);
+  const [installCopied, setInstallCopied] = useState(false);
 
   useEffect(() => {
     api
@@ -98,6 +110,9 @@ export default function ConnectionsPage() {
         setError(String(e));
         setLoading(false);
       });
+    api
+      .get<{ hook_context_enabled: boolean }>("/api/account/hook-settings")
+      .then((data) => setHookEnabled(data.hook_context_enabled));
   }, [api]);
 
   async function confirmDisconnect() {
@@ -106,6 +121,7 @@ export default function ConnectionsPage() {
     try {
       await api.delete(`/api/connections/${encodeURIComponent(pendingDisconnect.client_id)}`);
       setConnections((prev) => prev.filter((c) => c.client_id !== pendingDisconnect.client_id));
+      refreshOnboarding();
     } catch {
       // no-op — connection stays in the list if the disconnect failed
     } finally {
@@ -114,12 +130,87 @@ export default function ConnectionsPage() {
     }
   }
 
+  async function toggleHookEnabled(next: boolean) {
+    setHookToggling(true);
+    const prev = hookEnabled;
+    setHookEnabled(next);
+    try {
+      await api.post("/api/account/hook-settings", { hook_context_enabled: next });
+    } catch {
+      setHookEnabled(prev);
+    } finally {
+      setHookToggling(false);
+    }
+  }
+
+  async function mintToken() {
+    setMinting(true);
+    setMintError(null);
+    try {
+      const data = await api.post<{ token: string; id: string; label: string; createdAt: string }>(
+        "/api/tokens",
+        { label: "default" }
+      );
+      setNewToken(data.token);
+      setManualTokens((prev) =>
+        ([{ id: data.id, label: data.label, createdAt: data.createdAt, revokedAt: null, lastUsedAt: null }] as ManualToken[]).concat(
+          prev.map((t) => ({ ...t, revokedAt: t.revokedAt ?? new Date().toISOString() }))
+        )
+      );
+      refreshOnboarding();
+    } catch (e) {
+      setMintError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setMinting(false);
+    }
+  }
+
+  const installCommand = newToken
+    ? `curl -fsSL ${MCP_URL}/install-hook.sh | CONTINUUM_TOKEN=${newToken} bash`
+    : "";
+  const installCommandDisplay = newToken
+    ? `curl -fsSL ${MCP_URL}/install-hook.sh | CONTINUUM_TOKEN=${maskSecret(newToken)} bash`
+    : "";
+
+  async function copyInstallCommand() {
+    if (!installCommand) return;
+    await navigator.clipboard.writeText(installCommand);
+    setInstallCopied(true);
+    setTimeout(() => setInstallCopied(false), 2000);
+  }
+
   const activeManualToken = manualTokens.find((t) => !t.revokedAt);
 
   return (
     <>
       <main className="max-w-3xl mx-auto px-6 py-10 space-y-10">
         <GettingStarted />
+
+        <section>
+          <h2 className="text-xl font-semibold mb-4">Auto-context</h2>
+          <Card>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm font-medium">Auto-context injection</p>
+                  <p className="text-muted-foreground text-xs mt-0.5">
+                    Lets the Claude Code hook and other connected clients pull relevant memory
+                    into every message automatically. Turn off to stop all automatic retrieval
+                    for your account.
+                  </p>
+                </div>
+                <Switch
+                  checked={hookEnabled ?? true}
+                  disabled={hookEnabled === null || hookToggling}
+                  onCheckedChange={toggleHookEnabled}
+                />
+              </div>
+              <Button variant="outline" size="sm" onClick={() => setInstallOpen(true)}>
+                Set up auto-context for Claude Code
+              </Button>
+            </CardContent>
+          </Card>
+        </section>
 
         <section>
           <h2 className="text-xl font-semibold mb-4">Connected clients</h2>
@@ -176,6 +267,41 @@ export default function ConnectionsPage() {
           </section>
         )}
       </main>
+
+      <Dialog open={installOpen} onOpenChange={setInstallOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Auto-context for Claude Code</DialogTitle>
+            <DialogDescription>
+              Injects relevant memory into every message automatically, instead of relying on
+              Claude to call memory_search itself — scoped to whichever project workspace Claude
+              has already picked for the current directory (falling back to &quot;default&quot;),
+              plus your default workspace so cross-project facts still surface.
+            </DialogDescription>
+          </DialogHeader>
+          {newToken ? (
+            <div className="space-y-3">
+              <code className="block text-xs break-all rounded border border-border bg-muted/40 p-3 font-mono">
+                {installCommandDisplay}
+              </code>
+              <Button onClick={copyInstallCommand} variant="outline" size="sm">
+                {installCopied ? "Copied!" : "Copy command"}
+              </Button>
+              <p className="text-muted-foreground text-xs">
+                The token above is masked on screen — the copy button places the full working
+                command on your clipboard. Run it in a terminal.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Button onClick={mintToken} disabled={minting} variant="outline" size="sm">
+                {minting ? "Generating…" : "Generate a token to get the install command"}
+              </Button>
+              {mintError && <p className="text-destructive text-xs font-mono">{mintError}</p>}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={pendingDisconnect !== null} onOpenChange={(open) => !open && setPendingDisconnect(null)}>
         <DialogContent>

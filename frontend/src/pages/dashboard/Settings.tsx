@@ -4,12 +4,12 @@ import { Check, Monitor, Moon, Sun } from "lucide-react";
 import { useTheme } from "@/lib/theme-context";
 import { useWorkspace } from "@/lib/workspace-context";
 import { useApiClient } from "@/lib/api-client";
+import { maskSecret } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -25,13 +25,6 @@ interface TokenMeta {
   createdAt: string;
   revokedAt: string | null;
   lastUsedAt: string | null;
-}
-
-const MCP_URL = import.meta.env.VITE_CONTINUUM_MCP_URL || "https://continuum-mcp.sshogunn.org";
-
-function maskSecret(value: string, prefixLen = 8, suffixLen = 4): string {
-  if (value.length <= prefixLen + suffixLen) return value;
-  return `${value.slice(0, prefixLen)}${"•".repeat(12)}${value.slice(-suffixLen)}`;
 }
 
 const THEME_OPTIONS = [
@@ -98,28 +91,10 @@ function TokensTab() {
   const [minting, setMinting] = useState(false);
   const [mintError, setMintError] = useState<string | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
-  const [hookEnabled, setHookEnabled] = useState<boolean | null>(null);
-  const [hookToggling, setHookToggling] = useState(false);
 
   useEffect(() => {
     api.get<TokenMeta[]>("/api/tokens").then(setTokens);
-    api
-      .get<{ hook_context_enabled: boolean }>("/api/account/hook-settings")
-      .then((data) => setHookEnabled(data.hook_context_enabled));
   }, [api]);
-
-  async function toggleHookEnabled(next: boolean) {
-    setHookToggling(true);
-    const prev = hookEnabled;
-    setHookEnabled(next);
-    try {
-      await api.post("/api/account/hook-settings", { hook_context_enabled: next });
-    } catch {
-      setHookEnabled(prev);
-    } finally {
-      setHookToggling(false);
-    }
-  }
 
   async function mintToken() {
     setMinting(true);
@@ -163,22 +138,6 @@ function TokensTab() {
     setTimeout(() => setCopied(false), 2000);
   }
 
-  const [installOpen, setInstallOpen] = useState(false);
-  const [installCopied, setInstallCopied] = useState(false);
-  const installCommand = newToken
-    ? `curl -fsSL ${MCP_URL}/install-hook.sh | CONTINUUM_TOKEN=${newToken} bash`
-    : "";
-  const installCommandDisplay = newToken
-    ? `curl -fsSL ${MCP_URL}/install-hook.sh | CONTINUUM_TOKEN=${maskSecret(newToken)} bash`
-    : "";
-
-  async function copyInstallCommand() {
-    if (!installCommand) return;
-    await navigator.clipboard.writeText(installCommand);
-    setInstallCopied(true);
-    setTimeout(() => setInstallCopied(false), 2000);
-  }
-
   const activeToken = tokens.find((t) => !t.revokedAt);
 
   return (
@@ -207,69 +166,14 @@ function TokensTab() {
           ) : (
             <p className="text-sm text-muted-foreground">No active token. Generate one to use Continuum with MCP clients.</p>
           )}
-          <div className="flex items-center gap-2">
-            <Button onClick={mintToken} disabled={minting}>
-              {minting ? "Generating…" : activeToken ? "Rotate token" : "Generate token"}
-            </Button>
-            <Button variant="outline" onClick={() => setInstallOpen(true)}>
-              Set up auto-context for Claude Code
-            </Button>
-          </div>
+          <Button onClick={mintToken} disabled={minting}>
+            {minting ? "Generating…" : activeToken ? "Rotate token" : "Generate token"}
+          </Button>
           {mintError && (
             <p className="text-destructive text-xs mt-2 font-mono">{mintError}</p>
           )}
         </CardContent>
       </Card>
-
-      <Card>
-        <CardContent className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium">Auto-context injection</p>
-            <p className="text-muted-foreground text-xs mt-0.5">
-              Lets the Claude Code hook and other connected clients pull relevant memory into
-              every message automatically. Turn off to stop all automatic retrieval for your
-              account.
-            </p>
-          </div>
-          <Switch
-            checked={hookEnabled ?? true}
-            disabled={hookEnabled === null || hookToggling}
-            onCheckedChange={toggleHookEnabled}
-          />
-        </CardContent>
-      </Card>
-
-      <Dialog open={installOpen} onOpenChange={setInstallOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Auto-context for Claude Code</DialogTitle>
-            <DialogDescription>
-              Injects relevant memory into every message automatically, instead of relying on
-              Claude to call memory_search itself — scoped to whichever project workspace Claude
-              has already picked for the current directory (falling back to &quot;default&quot;),
-              plus your default workspace so cross-project facts still surface.
-            </DialogDescription>
-          </DialogHeader>
-          {newToken ? (
-            <div className="space-y-3">
-              <code className="block text-xs break-all rounded border border-border bg-muted/40 p-3 font-mono">
-                {installCommandDisplay}
-              </code>
-              <Button onClick={copyInstallCommand} variant="outline" size="sm">
-                {installCopied ? "Copied!" : "Copy command"}
-              </Button>
-              <p className="text-muted-foreground text-xs">
-                The token above is masked on screen — the copy button places the full working
-                command on your clipboard. Run it in a terminal.
-              </p>
-            </div>
-          ) : (
-            <Button onClick={mintToken} disabled={minting} variant="outline" size="sm">
-              {minting ? "Generating…" : "Generate a token to get the install command"}
-            </Button>
-          )}
-        </DialogContent>
-      </Dialog>
 
       {tokens.length > 0 && (
         <div>

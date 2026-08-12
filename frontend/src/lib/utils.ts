@@ -14,6 +14,11 @@ export function stringToHue(input: string): number {
   return Math.abs(hash) % 360
 }
 
+export function maskSecret(value: string, prefixLen = 8, suffixLen = 4): string {
+  if (value.length <= prefixLen + suffixLen) return value
+  return `${value.slice(0, prefixLen)}${"•".repeat(12)}${value.slice(-suffixLen)}`
+}
+
 export function relativeTime(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime()
   const diffSec = Math.round(diffMs / 1000)
