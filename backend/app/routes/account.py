@@ -54,3 +54,39 @@ async def purge_account_data(
 async def delete_identity(user: dict = Depends(get_current_user)):
     await delete_clerk_user(user["sub"])
     return {"deleted": True}
+
+
+@router.get("/hook-settings")
+async def get_hook_settings(user: dict = Depends(get_current_user)):
+    url = f"{settings.CONTINUUM_CORE_BASE_URL}/internal/account/hook-settings"
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            url,
+            params={"clerk_id": user["sub"]},
+            headers={"X-Internal-Secret": settings.CONTINUUM_INTERNAL_SECRET},
+            timeout=10.0,
+        )
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail="Failed to fetch hook settings")
+    return resp.json()
+
+
+@router.post("/hook-settings")
+async def set_hook_settings(
+    body: dict,
+    user: dict = Depends(get_current_user),
+):
+    url = f"{settings.CONTINUUM_CORE_BASE_URL}/internal/account/hook-settings"
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            url,
+            json={
+                "clerk_id": user["sub"],
+                "hook_context_enabled": bool(body.get("hook_context_enabled", True)),
+            },
+            headers={"X-Internal-Secret": settings.CONTINUUM_INTERNAL_SECRET},
+            timeout=10.0,
+        )
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail="Failed to update hook settings")
+    return resp.json()

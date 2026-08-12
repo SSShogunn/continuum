@@ -310,6 +310,8 @@ async def hook_context(request: Request) -> Response:
     access_token = await _jwt_verifier.verify_token(authz[7:].strip())
     if access_token is None:
         return JSONResponse({"error": "Invalid or expired token"}, status_code=401)
+    if not await memory.get_hook_context_enabled(access_token.client_id):
+        return JSONResponse({"context": None})
 
     body = await request.json()
     query = (body.get("query") or "").strip()
@@ -446,6 +448,30 @@ async def internal_account_export(request: Request) -> Response:
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "workspaces": by_workspace,
     })
+
+
+@mcp.custom_route("/internal/account/hook-settings", methods=["GET"])
+async def internal_account_get_hook_settings(request: Request) -> Response:
+    if not _check_internal_secret(request):
+        return Response("Forbidden", status_code=403)
+    clerk_id = request.query_params.get("clerk_id", "")
+    if not clerk_id:
+        return JSONResponse({"error": "clerk_id required"}, status_code=400)
+    enabled = await memory.get_hook_context_enabled(clerk_id)
+    return JSONResponse({"hook_context_enabled": enabled})
+
+
+@mcp.custom_route("/internal/account/hook-settings", methods=["POST"])
+async def internal_account_set_hook_settings(request: Request) -> Response:
+    if not _check_internal_secret(request):
+        return Response("Forbidden", status_code=403)
+    body = await request.json()
+    clerk_id = body.get("clerk_id", "")
+    if not clerk_id:
+        return JSONResponse({"error": "clerk_id required"}, status_code=400)
+    enabled = bool(body.get("hook_context_enabled", True))
+    await memory.set_hook_context_enabled(clerk_id, enabled)
+    return JSONResponse({"hook_context_enabled": enabled})
 
 
 @mcp.custom_route("/internal/account/purge", methods=["POST"])

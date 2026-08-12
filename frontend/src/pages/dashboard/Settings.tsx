@@ -9,6 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -97,10 +98,28 @@ function TokensTab() {
   const [minting, setMinting] = useState(false);
   const [mintError, setMintError] = useState<string | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [hookEnabled, setHookEnabled] = useState<boolean | null>(null);
+  const [hookToggling, setHookToggling] = useState(false);
 
   useEffect(() => {
     api.get<TokenMeta[]>("/api/tokens").then(setTokens);
+    api
+      .get<{ hook_context_enabled: boolean }>("/api/account/hook-settings")
+      .then((data) => setHookEnabled(data.hook_context_enabled));
   }, [api]);
+
+  async function toggleHookEnabled(next: boolean) {
+    setHookToggling(true);
+    const prev = hookEnabled;
+    setHookEnabled(next);
+    try {
+      await api.post("/api/account/hook-settings", { hook_context_enabled: next });
+    } catch {
+      setHookEnabled(prev);
+    } finally {
+      setHookToggling(false);
+    }
+  }
 
   async function mintToken() {
     setMinting(true);
@@ -199,6 +218,24 @@ function TokensTab() {
           {mintError && (
             <p className="text-destructive text-xs mt-2 font-mono">{mintError}</p>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium">Auto-context injection</p>
+            <p className="text-muted-foreground text-xs mt-0.5">
+              Lets the Claude Code hook and other connected clients pull relevant memory into
+              every message automatically. Turn off to stop all automatic retrieval for your
+              account.
+            </p>
+          </div>
+          <Switch
+            checked={hookEnabled ?? true}
+            disabled={hookEnabled === null || hookToggling}
+            onCheckedChange={toggleHookEnabled}
+          />
         </CardContent>
       </Card>
 

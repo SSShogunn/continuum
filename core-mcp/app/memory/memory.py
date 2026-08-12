@@ -244,6 +244,28 @@ async def delete_account(clerk_id: str) -> int:
     return int(result.split()[-1])
 
 
+async def get_hook_context_enabled(clerk_id: str) -> bool:
+    async with pg.pool().acquire() as conn:
+        value = await conn.fetchval(
+            "SELECT hook_context_enabled FROM account_settings WHERE clerk_id = $1",
+            clerk_id,
+        )
+    return True if value is None else value
+
+
+async def set_hook_context_enabled(clerk_id: str, enabled: bool) -> None:
+    async with pg.pool().acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO account_settings (clerk_id, hook_context_enabled, updated_at)
+            VALUES ($1, $2, now())
+            ON CONFLICT (clerk_id) DO UPDATE
+                SET hook_context_enabled = $2, updated_at = now()
+            """,
+            clerk_id, enabled,
+        )
+
+
 async def get_memory_stats(clerk_id: str) -> dict:
     prefix = f"{clerk_id}:%"
     prefix_len = len(clerk_id) + 1

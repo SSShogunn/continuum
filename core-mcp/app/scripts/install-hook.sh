@@ -48,8 +48,10 @@ cat > "$HOOK_PATH" << 'HOOK_SCRIPT_EOF'
 # proceeds with no injected context.
 
 TOKEN_FILE="$HOME/.continuum/hook-token"
+DISABLE_FILE="$HOME/.continuum/hook-disabled"
 CONTINUUM_URL="${CONTINUUM_MCP_URL:-https://continuum-mcp.sshogunn.org}"
 
+[ -f "$DISABLE_FILE" ] && exit 0
 [ -f "$TOKEN_FILE" ] || exit 0
 TOKEN=$(<"$TOKEN_FILE")
 [ -n "$TOKEN" ] || exit 0
