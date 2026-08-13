@@ -35,6 +35,7 @@ load_dotenv()
 
 ICON_PATH = Path(__file__).parent / "icons" / "logo.svg"
 INSTALL_HOOK_SCRIPT_PATH = Path(__file__).parent / "scripts" / "install-hook.sh"
+UNINSTALL_HOOK_SCRIPT_PATH = Path(__file__).parent / "scripts" / "uninstall-hook.sh"
 
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -229,6 +230,17 @@ async def serve_install_hook(request: Request) -> Response:
         INSTALL_HOOK_SCRIPT_PATH.read_bytes(),
         media_type="text/x-shellscript",
         headers={"Content-Disposition": "inline; filename=install-hook.sh"},
+    )
+
+
+@mcp.custom_route("/uninstall-hook.sh", methods=["GET"])
+async def serve_uninstall_hook(request: Request) -> Response:
+    """Public — reverses install-hook.sh. Pure local cleanup, no token needed:
+    `curl -fsSL https://continuum-mcp.sshogunn.org/uninstall-hook.sh | bash`."""
+    return Response(
+        UNINSTALL_HOOK_SCRIPT_PATH.read_bytes(),
+        media_type="text/x-shellscript",
+        headers={"Content-Disposition": "inline; filename=uninstall-hook.sh"},
     )
 
 
