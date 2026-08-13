@@ -253,6 +253,14 @@ def _check_internal_secret(request: Request) -> bool:
     return bool(secret) and request.headers.get("X-Internal-Secret") == secret
 
 
+async def _json_body(request: Request) -> dict | None:
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        return None
+    return body if isinstance(body, dict) else None
+
+
 @mcp.custom_route("/.well-known/oauth-authorization-server", methods=["GET"])
 async def oauth_discovery(request: Request) -> Response:
     backend = os.environ.get("CONTINUUM_BACKEND_PUBLIC_URL", "").rstrip("/")
@@ -311,7 +319,9 @@ async def internal_graph(request: Request) -> Response:
 async def internal_prompt(request: Request) -> Response:
     if not _check_internal_secret(request):
         return Response("Forbidden", status_code=403)
-    body = await request.json()
+    body = await _json_body(request)
+    if body is None:
+        return Response("Invalid JSON body", status_code=400)
     owner = auth.compose_owner(body.get("clerk_id", ""), body.get("workspace", "default"))
     mode = body.get("mode")
     if mode == "all":
@@ -346,7 +356,9 @@ async def hook_context(request: Request) -> Response:
     if not await memory.get_hook_context_enabled(access_token.client_id):
         return JSONResponse({"context": None})
 
-    body = await request.json()
+    body = await _json_body(request)
+    if body is None:
+        return Response("Invalid JSON body", status_code=400)
     query = (body.get("query") or "").strip()
     if not query:
         return JSONResponse({"context": None})
@@ -397,7 +409,9 @@ async def hook_session(request: Request) -> Response:
     if not await memory.get_hook_context_enabled(access_token.client_id):
         return JSONResponse({"queued": False})
 
-    body = await request.json()
+    body = await _json_body(request)
+    if body is None:
+        return Response("Invalid JSON body", status_code=400)
     transcript = (body.get("transcript") or "").strip()
     if not transcript:
         return JSONResponse({"queued": False})
@@ -423,7 +437,9 @@ async def internal_session_candidates(request: Request) -> Response:
 async def internal_session_candidate_resolve(request: Request) -> Response:
     if not _check_internal_secret(request):
         return Response("Forbidden", status_code=403)
-    body = await request.json()
+    body = await _json_body(request)
+    if body is None:
+        return Response("Invalid JSON body", status_code=400)
     owner = auth.compose_owner(body.get("clerk_id", ""), body.get("workspace", "default"))
     result = await capture.resolve_candidate(
         int(body["id"]), owner, accept=bool(body.get("accept"))
@@ -441,7 +457,9 @@ async def internal_memory_save(request: Request) -> Response:
     so a hand-edited entry behaves identically to a model-written one."""
     if not _check_internal_secret(request):
         return Response("Forbidden", status_code=403)
-    body = await request.json()
+    body = await _json_body(request)
+    if body is None:
+        return Response("Invalid JSON body", status_code=400)
     owner = auth.compose_owner(body.get("clerk_id", ""), body.get("workspace", "default"))
     name = (body.get("name") or "").strip()
     content = body.get("content") or ""
@@ -462,7 +480,9 @@ async def internal_memory_save(request: Request) -> Response:
 async def internal_memory_set_recall(request: Request) -> Response:
     if not _check_internal_secret(request):
         return Response("Forbidden", status_code=403)
-    body = await request.json()
+    body = await _json_body(request)
+    if body is None:
+        return Response("Invalid JSON body", status_code=400)
     owner = auth.compose_owner(body.get("clerk_id", ""), body.get("workspace", "default"))
     try:
         tier = await memory.set_recall(body["name"], body.get("recall", ""), owner=owner)
@@ -505,7 +525,9 @@ async def internal_memory_review(request: Request) -> Response:
 async def internal_memory_delete(request: Request) -> Response:
     if not _check_internal_secret(request):
         return Response("Forbidden", status_code=403)
-    body = await request.json()
+    body = await _json_body(request)
+    if body is None:
+        return Response("Invalid JSON body", status_code=400)
     owner = auth.compose_owner(body.get("clerk_id", ""), body.get("workspace", "default"))
     deleted = await memory.delete(body["name"], owner=owner)
     return JSONResponse({"deleted": deleted})
@@ -515,7 +537,9 @@ async def internal_memory_delete(request: Request) -> Response:
 async def internal_memory_import(request: Request) -> Response:
     if not _check_internal_secret(request):
         return Response("Forbidden", status_code=403)
-    body = await request.json()
+    body = await _json_body(request)
+    if body is None:
+        return Response("Invalid JSON body", status_code=400)
     owner = auth.compose_owner(body.get("clerk_id", ""), body.get("workspace", "default"))
     raw_entries = body.get("memories", [])
 
@@ -543,7 +567,9 @@ async def internal_memory_import(request: Request) -> Response:
 async def internal_memory_delete_workspace(request: Request) -> Response:
     if not _check_internal_secret(request):
         return Response("Forbidden", status_code=403)
-    body = await request.json()
+    body = await _json_body(request)
+    if body is None:
+        return Response("Invalid JSON body", status_code=400)
     workspace = body.get("workspace", "default")
     if workspace == "default":
         return Response("Cannot delete the default workspace", status_code=400)
@@ -641,7 +667,9 @@ async def internal_account_get_hook_settings(request: Request) -> Response:
 async def internal_account_set_hook_settings(request: Request) -> Response:
     if not _check_internal_secret(request):
         return Response("Forbidden", status_code=403)
-    body = await request.json()
+    body = await _json_body(request)
+    if body is None:
+        return Response("Invalid JSON body", status_code=400)
     clerk_id = body.get("clerk_id", "")
     if not clerk_id:
         return JSONResponse({"error": "clerk_id required"}, status_code=400)
@@ -654,7 +682,9 @@ async def internal_account_set_hook_settings(request: Request) -> Response:
 async def internal_account_purge(request: Request) -> Response:
     if not _check_internal_secret(request):
         return Response("Forbidden", status_code=403)
-    body = await request.json()
+    body = await _json_body(request)
+    if body is None:
+        return Response("Invalid JSON body", status_code=400)
     clerk_id = body.get("clerk_id", "")
     if not clerk_id:
         return JSONResponse({"error": "clerk_id required"}, status_code=400)
