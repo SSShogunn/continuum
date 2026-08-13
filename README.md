@@ -111,6 +111,17 @@ entries whose text reads like a rule but sits on a lower tier (imperative statem
 "unless explicitly asked") and offers one-click promotion; nothing is ever reclassified
 automatically.
 
+### Session capture (memory that writes itself)
+
+Retrieval is only half the loop — memory still only got *written* when a model chose to call
+`memory_save` mid-conversation, which is the same "only if it remembers to" failure the always-on
+tier fixes for reads. A `SessionEnd` hook posts the finished transcript to `POST /hook/session`,
+which enqueues an arq job that extracts durable facts (decisions, preferences, standing rules,
+project state) and writes them to a **review queue** — never straight to memory. The dashboard's
+Memory page shows them as proposals with Save/Discard. Nothing is auto-written, deliberately: an
+automatic writer that is wrong is worse than one that never runs, because a bad memory then
+contaminates every later retrieval. Disable it alone with `touch ~/.continuum/capture-disabled`.
+
 Project-scoping is deliberately kept out of the hook script — it stays a dumb lookup, not a second
 place that has to guess what project it's in. The model owns that decision: per rule 7 in
 `core-mcp/app/server.py`'s `_INSTRUCTIONS`, whenever it settles on a workspace for the project it's

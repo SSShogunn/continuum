@@ -11,7 +11,7 @@ from typing import Any
 from . import auth
 from .infra import browser_pool, db, pg
 from .infra import redis as redis_infra
-from .memory import kg, memory, prompt, search, taxonomy
+from .memory import capture, kg, memory, prompt, search, taxonomy
 import html2text
 import httpx
 import litellm
@@ -353,6 +353,59 @@ async def hook_context(request: Request) -> Response:
     )
     context = await prompt.build_hook_context(owner, query, extra_owner=extra_owner)
     return JSONResponse({"context": context})
+
+
+@mcp.custom_route("/hook/session", methods=["POST"])
+async def hook_session(request: Request) -> Response:
+    """End-of-session capture. Takes a finished transcript and queues memory
+    candidates for review, so writing to memory no longer depends on the model
+    choosing to call `memory_save` mid-conversation. Returns immediately and does
+    the extraction on the worker — a session-end hook must never block the client."""
+    if _jwt_verifier is None:
+        return Response("Not configured", status_code=503)
+    authz = request.headers.get("authorization", "")
+    if not authz.lower().startswith("bearer "):
+        return JSONResponse({"error": "Missing bearer token"}, status_code=401)
+    access_token = await _jwt_verifier.verify_token(authz[7:].strip())
+    if access_token is None:
+        return JSONResponse({"error": "Invalid or expired token"}, status_code=401)
+    if not await memory.get_hook_context_enabled(access_token.client_id):
+        return JSONResponse({"queued": False})
+
+    body = await request.json()
+    transcript = (body.get("transcript") or "").strip()
+    if not transcript:
+        return JSONResponse({"queued": False})
+    owner = auth.compose_owner(access_token.client_id, body.get("workspace", "default"))
+    await redis_infra.pool().enqueue_job(
+        "capture_session_job", owner, body.get("session_id") or "", transcript
+    )
+    return JSONResponse({"queued": True})
+
+
+@mcp.custom_route("/internal/session/candidates", methods=["GET"])
+async def internal_session_candidates(request: Request) -> Response:
+    if not _check_internal_secret(request):
+        return Response("Forbidden", status_code=403)
+    owner = auth.compose_owner(
+        request.query_params.get("clerk_id", ""),
+        request.query_params.get("workspace", "default"),
+    )
+    return JSONResponse({"candidates": await capture.list_candidates(owner)})
+
+
+@mcp.custom_route("/internal/session/candidates/resolve", methods=["POST"])
+async def internal_session_candidate_resolve(request: Request) -> Response:
+    if not _check_internal_secret(request):
+        return Response("Forbidden", status_code=403)
+    body = await request.json()
+    owner = auth.compose_owner(body.get("clerk_id", ""), body.get("workspace", "default"))
+    result = await capture.resolve_candidate(
+        int(body["id"]), owner, accept=bool(body.get("accept"))
+    )
+    if result is None:
+        return Response("No such pending candidate", status_code=404)
+    return JSONResponse(result)
 
 
 @mcp.custom_route("/internal/memory/save", methods=["POST"])

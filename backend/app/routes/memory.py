@@ -18,6 +18,12 @@ class RecallRequest(BaseModel):
     workspace: str = "default"
 
 
+class CandidateResolveRequest(BaseModel):
+    id: int
+    accept: bool
+    workspace: str = "default"
+
+
 class SaveRequest(BaseModel):
     name: str
     type: str = "note"
@@ -99,6 +105,38 @@ async def save_memory(body: SaveRequest, user: dict = Depends(get_current_user))
         )
     if resp.status_code != 200:
         raise HTTPException(status_code=resp.status_code, detail="Failed to save memory")
+    return resp.json()
+
+
+@router.get("/candidates")
+async def get_session_candidates(workspace: str = "default", user: dict = Depends(get_current_user)):
+    url = f"{settings.CONTINUUM_CORE_BASE_URL}/internal/session/candidates"
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            url,
+            params={"clerk_id": user["sub"], "workspace": workspace},
+            headers={"X-Internal-Secret": settings.CONTINUUM_INTERNAL_SECRET},
+            timeout=10.0,
+        )
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail="Failed to fetch session candidates")
+    return resp.json()
+
+
+@router.post("/candidates/resolve")
+async def resolve_session_candidate(
+    body: CandidateResolveRequest, user: dict = Depends(get_current_user)
+):
+    url = f"{settings.CONTINUUM_CORE_BASE_URL}/internal/session/candidates/resolve"
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            url,
+            json={**body.model_dump(), "clerk_id": user["sub"]},
+            headers={"X-Internal-Secret": settings.CONTINUUM_INTERNAL_SECRET},
+            timeout=30.0,
+        )
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail="Failed to resolve candidate")
     return resp.json()
 
 

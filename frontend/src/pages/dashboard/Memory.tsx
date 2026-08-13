@@ -29,6 +29,7 @@ import {
 import {
   ArrowLeft,
   ArrowUpRight,
+  Check,
   Command,
   Database,
   Download,
@@ -38,9 +39,11 @@ import {
   Pin,
   Plus,
   Search,
+  Sparkles,
   Trash2,
   TriangleAlert,
   Upload,
+  X,
 } from "lucide-react";
 
 type RecallTier = "always" | "relevance" | "manual";
@@ -61,6 +64,18 @@ interface ReviewCandidate {
   type: string;
   recall: RecallTier;
   statements: string[];
+}
+
+interface SessionCandidate {
+  id: number;
+  session_id: string | null;
+  name: string;
+  type: string;
+  recall: RecallTier;
+  description: string;
+  content: string;
+  supersedes: string | null;
+  created_at: string;
 }
 
 interface EditorState {
@@ -112,6 +127,9 @@ export default function MemoryPage() {
   const [candidates, setCandidates] = useState<ReviewCandidate[]>([]);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [dismissedReview, setDismissedReview] = useState(false);
+  const [proposed, setProposed] = useState<SessionCandidate[]>([]);
+  const [expandedProposal, setExpandedProposal] = useState<number | null>(null);
+  const [resolving, setResolving] = useState<number | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [saving, setSaving] = useState(false);
   const [editorError, setEditorError] = useState<string | null>(null);
@@ -147,6 +165,29 @@ export default function MemoryPage() {
       .then((data) => setCandidates(data.candidates ?? []))
       .catch(() => setCandidates([]));
   }, [workspace, api]);
+
+  useEffect(() => {
+    setExpandedProposal(null);
+    api
+      .get<{ candidates: SessionCandidate[] }>(
+        `/api/memory/candidates?workspace=${encodeURIComponent(workspace)}`
+      )
+      .then((data) => setProposed(data.candidates ?? []))
+      .catch(() => setProposed([]));
+  }, [workspace, api]);
+
+  async function resolveProposal(id: number, accept: boolean) {
+    setResolving(id);
+    try {
+      await api.post("/api/memory/candidates/resolve", { id, accept, workspace });
+      setProposed((prev) => prev.filter((c) => c.id !== id));
+      if (accept) await refresh();
+    } catch {
+      // leave it in the queue if the call failed
+    } finally {
+      setResolving(null);
+    }
+  }
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -430,6 +471,88 @@ export default function MemoryPage() {
         {importMessage && (
           <div className="border-b bg-muted/40 px-6 py-2 text-xs text-muted-foreground shrink-0">
             {importMessage}
+          </div>
+        )}
+
+        {proposed.length > 0 && (
+          <div className="border-b bg-primary/5 px-6 py-2.5 shrink-0">
+            <div className="flex items-center gap-2 text-xs">
+              <Sparkles className="size-3.5 text-primary shrink-0" />
+              <p className="font-medium">
+                {proposed.length} memor{proposed.length === 1 ? "y" : "ies"} proposed from recent
+                sessions
+              </p>
+              <span className="text-muted-foreground">— nothing is saved until you approve it.</span>
+            </div>
+
+            <div className="mt-2 space-y-2">
+              {proposed.map((c) => {
+                const isOpen = expandedProposal === c.id;
+                const isBusy = resolving === c.id;
+                return (
+                  <div key={c.id} className="rounded-md border bg-background px-3 py-2">
+                    <div className="flex items-start gap-3">
+                      <button
+                        className="min-w-0 flex-1 text-left"
+                        onClick={() => setExpandedProposal(isOpen ? null : c.id)}
+                      >
+                        <span className="flex flex-wrap items-center gap-1.5">
+                          <span className="font-mono text-xs font-medium">{c.name}</span>
+                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                            {c.type}
+                          </Badge>
+                          {c.recall === "always" && (
+                            <Badge className="gap-1 text-[10px] px-1.5 py-0">
+                              <Pin className="size-2.5" />
+                              Always-on
+                            </Badge>
+                          )}
+                          {byName.has(c.name) && (
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                              updates existing
+                            </Badge>
+                          )}
+                          {c.supersedes && (
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                              supersedes {c.supersedes}
+                            </Badge>
+                          )}
+                        </span>
+                        <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                          {c.description}
+                        </span>
+                      </button>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-6 text-xs"
+                          disabled={isBusy}
+                          onClick={() => resolveProposal(c.id, true)}
+                        >
+                          <Check />
+                          Save
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 text-xs"
+                          disabled={isBusy}
+                          onClick={() => resolveProposal(c.id, false)}
+                        >
+                          <X />
+                        </Button>
+                      </div>
+                    </div>
+                    {isOpen && (
+                      <pre className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap border-t pt-2 font-mono text-[11px] text-muted-foreground">
+                        {c.content}
+                      </pre>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 
