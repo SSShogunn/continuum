@@ -15,7 +15,7 @@ def require_internal_secret(request: Request) -> None:
 
 
 async def get_current_user(request: Request) -> dict:
-    state = _clerk.authenticate_request(
+    state = await _clerk.authenticate_request_async(
         request,
         AuthenticateRequestOptions(),
     )

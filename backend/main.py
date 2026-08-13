@@ -4,6 +4,7 @@ import uvicorn
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app import core_client
 from app.config import settings
 from app.db import connect, disconnect
 from app.deps import get_current_user
@@ -13,7 +14,9 @@ from app.routes import account, admin, connections, internal, memory, oauth, sta
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await connect()
+    await core_client.start()
     yield
+    await core_client.stop()
     await disconnect()
 
 

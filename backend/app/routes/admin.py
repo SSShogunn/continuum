@@ -1,7 +1,7 @@
-import httpx
 from clerk_backend_api import Clerk
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 
+from app import core_client
 from app.config import settings
 from app.deps import require_admin
 
@@ -12,7 +12,7 @@ _clerk = Clerk(bearer_auth=settings.CLERK_SECRET_KEY)
 
 @router.get("/users")
 async def list_users(_: dict = Depends(require_admin)):
-    response = _clerk.users.list()
+    response = await _clerk.users.list_async()
     return [
         {
             "id": u.id,
@@ -27,13 +27,4 @@ async def list_users(_: dict = Depends(require_admin)):
 
 @router.get("/stats")
 async def get_stats(_: dict = Depends(require_admin)):
-    url = f"{settings.CONTINUUM_CORE_BASE_URL}/internal/stats"
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(
-            url,
-            headers={"X-Internal-Secret": settings.CONTINUUM_INTERNAL_SECRET},
-            timeout=10.0,
-        )
-    if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail="Failed to fetch stats from core")
-    return resp.json()
+    return await core_client.get("/internal/stats", "Failed to fetch stats from core")
