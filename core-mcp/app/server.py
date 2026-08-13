@@ -351,8 +351,29 @@ async def hook_context(request: Request) -> Response:
     extra_owner = (
         auth.compose_owner(access_token.client_id, "default") if workspace != "default" else None
     )
-    context = await prompt.build_hook_context(owner, query, extra_owner=extra_owner)
-    return JSONResponse({"context": context})
+
+    started = time.perf_counter()
+    result = await prompt.build_hook_context(
+        owner, query, extra_owner=extra_owner, recent=body.get("recent")
+    )
+    # Logged like a tool call so injections show up in the Activity view next to
+    # real ones: without a record of what was auto-injected there is no way to
+    # tell whether the hook is helping or just spending tokens.
+    db.log_request(
+        "hook/context",
+        {"query": query[:200], "workspace": workspace, "expanded": result["expanded"]},
+        "ok",
+        response=json.dumps({
+            "gate_passed": result["gate_passed"],
+            "directives": result["directives"],
+            "memories": result["memories"],
+            "linked": result["linked"],
+            "facts": result["facts"],
+        }),
+        duration_ms=(time.perf_counter() - started) * 1000,
+        owner=owner,
+    )
+    return JSONResponse({"context": result["context"]})
 
 
 @mcp.custom_route("/hook/session", methods=["POST"])
