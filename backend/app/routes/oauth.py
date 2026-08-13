@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import re
 import secrets
 import urllib.parse
 import uuid
@@ -18,6 +19,17 @@ from app.jwt import mint_mcp_token
 from app.models import McpToken, OAuthClient, OAuthCode
 
 router = APIRouter(tags=["oauth"])
+
+PKCE_METHOD = "S256"
+
+_VERIFIER_RE = re.compile(r"^[A-Za-z0-9\-._~]{43,128}$")
+
+
+def _require_pkce(code_challenge: str | None, code_challenge_method: str | None) -> None:
+    if not code_challenge:
+        raise HTTPException(400, "PKCE is required: code_challenge is missing")
+    if code_challenge_method != PKCE_METHOD:
+        raise HTTPException(400, f"PKCE code_challenge_method must be {PKCE_METHOD}")
 
 
 @router.get("/.well-known/oauth-authorization-server")
@@ -83,14 +95,16 @@ async def authorize(
         raise HTTPException(400, "redirect_uri not registered for this client")
     if response_type != "code":
         raise HTTPException(400, "Only response_type=code is supported")
+    _require_pkce(code_challenge, code_challenge_method)
 
-    params: dict[str, str] = {"client_id": client_id, "redirect_uri": redirect_uri}
+    params: dict[str, str] = {
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "code_challenge": code_challenge,
+        "code_challenge_method": code_challenge_method,
+    }
     if state:
         params["state"] = state
-    if code_challenge:
-        params["code_challenge"] = code_challenge
-    if code_challenge_method:
-        params["code_challenge_method"] = code_challenge_method
 
     frontend = settings.CONTINUUM_FRONTEND_URL.rstrip("/")
     return RedirectResponse(f"{frontend}/oauth-connect?{urllib.parse.urlencode(params)}")
@@ -113,6 +127,7 @@ async def authorize_complete(
     client = await session.get(OAuthClient, body.client_id)
     if not client or body.redirect_uri not in client.redirectUris:
         raise HTTPException(400, "Invalid client or redirect_uri")
+    _require_pkce(body.code_challenge, body.code_challenge_method)
 
     code = secrets.token_urlsafe(32)
     session.add(
@@ -166,13 +181,18 @@ async def token_exchange(
         await session.commit()
         raise HTTPException(400, detail={"error": "invalid_grant", "error_description": "Code expired"})
 
-    if oauth_code.codeChallenge:
-        if not code_verifier:
-            raise HTTPException(400, detail={"error": "invalid_grant", "error_description": "code_verifier required"})
-        digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
-        computed = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
-        if computed != oauth_code.codeChallenge:
-            raise HTTPException(400, detail={"error": "invalid_grant", "error_description": "PKCE verification failed"})
+    if not oauth_code.codeChallenge:
+        raise HTTPException(400, detail={"error": "invalid_grant", "error_description": "Authorization code was not issued with PKCE"})
+    if oauth_code.codeChallengeMethod != PKCE_METHOD:
+        raise HTTPException(400, detail={"error": "invalid_grant", "error_description": f"Unsupported code_challenge_method, expected {PKCE_METHOD}"})
+    if not code_verifier:
+        raise HTTPException(400, detail={"error": "invalid_request", "error_description": "code_verifier required"})
+    if not _VERIFIER_RE.match(code_verifier):
+        raise HTTPException(400, detail={"error": "invalid_grant", "error_description": "Malformed code_verifier"})
+    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
+    computed = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+    if not secrets.compare_digest(computed, oauth_code.codeChallenge):
+        raise HTTPException(400, detail={"error": "invalid_grant", "error_description": "PKCE verification failed"})
 
     # One-time use
     clerk_user_id = oauth_code.clerkUserId

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useUser } from "@clerk/clerk-react";
-import { ShieldCheck } from "lucide-react";
+import { ShieldAlert, ShieldCheck } from "lucide-react";
 import { AuthShell } from "@/components/auth-shell";
 import { Button } from "@/components/ui/button";
 import { useApiClient } from "@/lib/api-client";
@@ -19,6 +19,12 @@ export default function OAuthConnectPage() {
   const state = params.get("state") ?? "";
   const codeChallenge = params.get("code_challenge") ?? "";
   const codeChallengeMethod = params.get("code_challenge_method") ?? "";
+
+  const pkceError = !codeChallenge
+    ? "This client did not send a PKCE code_challenge, which Continuum requires for every connection."
+    : codeChallengeMethod !== "S256"
+      ? `This client asked for an unsupported PKCE method (${codeChallengeMethod || "none"}). Only S256 is accepted.`
+      : null;
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -50,6 +56,25 @@ export default function OAuthConnectPage() {
     return (
       <AuthShell tab="AUTHORIZE CLIENT" stamp={"PENDING\nREVIEW"}>
         <p className="font-mono text-sm text-muted-foreground">Loading…</p>
+      </AuthShell>
+    );
+  }
+
+  if (pkceError) {
+    return (
+      <AuthShell tab="AUTHORIZE CLIENT" stamp={"REQUEST\nREJECTED"}>
+        <div className="space-y-4">
+          <div className="flex items-center gap-2 text-foreground">
+            <ShieldAlert className="size-4 text-destructive" />
+            <h1 className="font-heading text-lg font-semibold tracking-tight">
+              Cannot authorize this client
+            </h1>
+          </div>
+          <p className="font-mono text-sm text-muted-foreground">{pkceError}</p>
+          <p className="font-mono text-xs text-muted-foreground">
+            Nothing was authorized. Reconnect using a client that supports PKCE.
+          </p>
+        </div>
       </AuthShell>
     );
   }
