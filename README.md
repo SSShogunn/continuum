@@ -159,10 +159,17 @@ cp frontend/.env.example frontend/.env
 docker compose up -d --build
 ```
 
-One root `docker-compose.yml` runs all four containers (`frontend`, `backend`, `core-mcp`,
-`cloudflared`) on a shared network. `backend` and `core-mcp` publish no host ports — reachable
-only via the Docker network and, externally, through the `cloudflared` tunnel. Dev-mode hot
-reload is on for all three app services.
+One root `docker-compose.yml` runs all eight containers (`frontend`, `backend`, `core-mcp`,
+`worker`, `postgres`, `redis`, `searxng`, `cloudflared`) on a shared network. Only `frontend`
+publishes a host port (3000) — everything else is reachable via the Docker network and,
+externally, through the `cloudflared` tunnel. That includes `postgres`, so reach it with
+`docker compose exec postgres psql -U continuum continuum` rather than a host-local client.
+Dev-mode hot reload is on for all three app services.
+
+Every service is `restart: unless-stopped`, and `postgres`/`redis` carry healthchecks that
+`backend`, `core-mcp`, and `worker` wait on via `depends_on.condition: service_healthy` — on a
+cold boot the `alembic upgrade head` that runs before each app service would otherwise race a
+Postgres that isn't accepting connections yet.
 
 `core-mcp`'s schema is managed by Alembic — the compose command runs `alembic upgrade head`
 before starting the server, so schema changes just need a new migration file in
@@ -197,7 +204,7 @@ backend/
   alembic/
 frontend/
   src/app/            # Next.js app router — dashboard, oauth-connect, landing
-docker-compose.yml     # not tracked in git — see .env.example files
+docker-compose.yml     # all services — secrets come from the .env files, see .env.example
 ```
 
 ## Environment variables
