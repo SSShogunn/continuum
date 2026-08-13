@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 from datetime import datetime, timezone
 
 from . import pg
@@ -8,6 +9,7 @@ from . import pg
 logger = logging.getLogger("continuum.db")
 
 MAX_FIELD_CHARS = 8000
+RETENTION_DAYS = int(os.environ.get("CONTINUUM_REQUEST_LOG_RETENTION_DAYS", "30"))
 
 _queue: asyncio.Queue | None = None
 _worker: asyncio.Task | None = None
@@ -231,6 +233,17 @@ async def get_recent_activity(
 async def delete_account(owner: str) -> int:
     async with pg.pool().acquire() as conn:
         result = await conn.execute("DELETE FROM requests WHERE owner = $1", owner)
+    return int(result.split()[-1])
+
+
+async def prune(days: int = RETENTION_DAYS) -> int:
+    if days <= 0:
+        return 0
+    async with pg.pool().acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM requests WHERE timestamp < now() - make_interval(days => $1)",
+            days,
+        )
     return int(result.split()[-1])
 
 

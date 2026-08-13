@@ -1,6 +1,8 @@
 import logging
 
-from .infra import pg
+from arq import cron
+
+from .infra import db, pg
 from .infra import redis as redis_infra
 from .memory import capture, kg
 
@@ -19,6 +21,11 @@ async def capture_session_job(ctx, owner: str, session_id: str, transcript: str)
     logger.info("Session capture: %d candidate(s) queued for owner=%s", saved, owner)
 
 
+async def prune_request_logs_job(ctx) -> None:
+    deleted = await db.prune()
+    logger.info("Request log prune: %d row(s) removed", deleted)
+
+
 async def startup(ctx) -> None:
     await pg.start()
     await redis_infra.start()
@@ -33,6 +40,7 @@ async def shutdown(ctx) -> None:
 
 class WorkerSettings:
     functions = [build_graph_job, capture_session_job]
+    cron_jobs = [cron(prune_request_logs_job, hour=3, minute=0)]
     on_startup = startup
     on_shutdown = shutdown
     redis_settings = redis_infra.redis_settings()
