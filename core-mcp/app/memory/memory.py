@@ -298,8 +298,8 @@ async def list_by_names(names: list[str], owner: str = "") -> list[dict]:
 async def list_workspaces(clerk_id: str) -> list[str]:
     async with pg.pool().acquire() as conn:
         rows = await conn.fetch(
-            "SELECT DISTINCT owner FROM memory WHERE owner LIKE $1",
-            f"{clerk_id}:%",
+            "SELECT DISTINCT owner FROM memory WHERE split_part(owner, ':', 1) = $1",
+            clerk_id,
         )
     prefix_len = len(clerk_id) + 1
     workspaces = {row["owner"][prefix_len:] for row in rows}
@@ -324,7 +324,9 @@ async def delete_workspace(owner: str = "") -> int:
 
 async def delete_account(clerk_id: str) -> int:
     async with pg.pool().acquire() as conn:
-        result = await conn.execute("DELETE FROM memory WHERE owner LIKE $1", f"{clerk_id}:%")
+        result = await conn.execute(
+            "DELETE FROM memory WHERE split_part(owner, ':', 1) = $1", clerk_id
+        )
     return int(result.split()[-1])
 
 
@@ -351,51 +353,50 @@ async def set_hook_context_enabled(clerk_id: str, enabled: bool) -> None:
 
 
 async def get_memory_stats(clerk_id: str) -> dict:
-    prefix = f"{clerk_id}:%"
     prefix_len = len(clerk_id) + 1
     async with pg.pool().acquire() as conn:
         total = await conn.fetchval(
-            "SELECT COUNT(*) FROM memory WHERE owner LIKE $1", prefix
+            "SELECT COUNT(*) FROM memory WHERE split_part(owner, ':', 1) = $1", clerk_id
         )
         by_type = await conn.fetch(
             """
             SELECT type, COUNT(*) AS count
             FROM memory
-            WHERE owner LIKE $1
+            WHERE split_part(owner, ':', 1) = $1
             GROUP BY type
             ORDER BY count DESC
             """,
-            prefix,
+            clerk_id,
         )
         by_recall = await conn.fetch(
             """
             SELECT recall, COUNT(*) AS count
             FROM memory
-            WHERE owner LIKE $1 AND archived_at IS NULL
+            WHERE split_part(owner, ':', 1) = $1 AND archived_at IS NULL
             GROUP BY recall
             ORDER BY count DESC
             """,
-            prefix,
+            clerk_id,
         )
         by_owner = await conn.fetch(
             """
             SELECT owner, COUNT(*) AS count
             FROM memory
-            WHERE owner LIKE $1
+            WHERE split_part(owner, ':', 1) = $1
             GROUP BY owner
             ORDER BY count DESC
             """,
-            prefix,
+            clerk_id,
         )
         created_per_day = await conn.fetch(
             """
             SELECT date_trunc('day', created_at) AS day, COUNT(*) AS count
             FROM memory
-            WHERE owner LIKE $1
+            WHERE split_part(owner, ':', 1) = $1
             GROUP BY day
             ORDER BY day
             """,
-            prefix,
+            clerk_id,
         )
     return {
         "total_entries": total,

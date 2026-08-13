@@ -164,6 +164,7 @@ async def resolve_candidate(candidate_id: int, owner: str, accept: bool) -> dict
 async def pending_count(clerk_id: str) -> int:
     async with pg.pool().acquire() as conn:
         return await conn.fetchval(
-            "SELECT COUNT(*) FROM session_candidate WHERE owner LIKE $1 AND status = 'pending'",
-            f"{clerk_id}:%",
+            "SELECT COUNT(*) FROM session_candidate "
+            "WHERE split_part(owner, ':', 1) = $1 AND status = 'pending'",
+            clerk_id,
         )
