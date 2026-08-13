@@ -73,6 +73,7 @@ indexes — no in-Python similarity loop.
 | `verify_quote` | Check whether a quoted string appears verbatim on a page — catches fabricated/misremembered citations, fuzzy-matches (`rapidfuzz`) the closest passage if not exact. |
 | `memory_save` / `memory_search` / `memory_list` / `memory_delete` | Persistent memory CRUD, per-user (scoped by JWT `owner`). |
 | `memory_set_recall` | Move an existing entry between recall tiers (`always` / `relevance` / `manual`) without rewriting it. |
+| `memory_append` | Add a line to an existing entry without resending its whole body — re-embeds and re-indexes like a full save. |
 | `memory_fact_search` | Semantic search over extracted atomic facts (see above). |
 
 Plus an MCP resource (`memory://context` — full memory context; not auto-loaded by most clients,
@@ -110,6 +111,17 @@ fact about an entity, and extracting one just pollutes the graph. The dashboard'
 entries whose text reads like a rule but sits on a lower tier (imperative statements — "never …",
 "unless explicitly asked") and offers one-click promotion; nothing is ever reclassified
 automatically.
+
+Two things sharpen what that route retrieves. **Short prompts get expanded**: a message under
+`CONTINUUM_HOOK_QUERY_EXPAND_CHARS` (80) is usually deictic — "do the same for the other one" —
+and embeds nowhere near anything stored, so the hook ships the tail of the conversation
+(`transcript_path`, last 6 turns) and the server folds it into the retrieval query behind the
+current message. Longer messages carry their own signal and are left alone, since padding them
+only blurs the query. **Matches then fan out one hop along `[[wikilinks]]`**
+(`CONTINUUM_HOOK_LINK_FANOUT`, 3): the link graph is hand-curated, so a link is a stronger claim
+of relatedness than embedding proximity, and one hop beats raising `top_k` — which just drags in
+the next-most-similar blob. Every injection is logged through the same path as a tool call, so
+what the hook actually sent shows up in the Activity view instead of vanishing.
 
 ### Session capture (memory that writes itself)
 

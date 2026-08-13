@@ -152,6 +152,10 @@ bypass of one.
    memory rather than just updating one in place, pass `supersedes=["old-name"]` on `memory_save`
    instead of leaving the stale entry to keep competing in search results.
 
+   To *add* to an entry that already exists, use `memory_append(name, text)` — never re-send the
+   whole `content` just to tack on a line. Reproducing a long body from memory is how entries
+   silently lose material.
+
 6. For "what do you know about me?" / "what do you remember?", call `memory_list` first, then
    `memory_search`.
 
@@ -1118,6 +1122,18 @@ async def memory_list(type: str | None = None, workspace: str = "default", inclu
         + (f" (archived {e['archived_at']})" if e.get("archived_at") else "")
         for e in entries
     )
+
+
+@mcp.tool
+async def memory_append(name: str, text: str, workspace: str = "default") -> str:
+    """Add a line or two to an existing memory entry without resending its whole body. Prefer this over `memory_save` when you are adding a fact to something that already exists — re-sending the full `content` to append one line risks silently dropping the rest of it. The entry is re-embedded and re-indexed exactly as a full save would be. `workspace` scopes the lookup — defaults to "default"."""
+    owner = auth.scoped_owner(workspace)
+    record = await memory.append(name, text, owner=owner)
+    if record is None:
+        raise ToolError(
+            f"No memory entry named '{name}' in workspace '{workspace}' — use memory_save to create it."
+        )
+    return f"Appended to memory '{name}'."
 
 
 @mcp.tool

@@ -59,6 +59,39 @@ async def save(
     }
 
 
+async def get_entry(name: str, owner: str = "") -> dict | None:
+    async with pg.pool().acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT name, type, recall, description, content FROM memory WHERE owner = $1 AND name = $2",
+            owner, name,
+        )
+    return dict(row) if row else None
+
+
+async def append(name: str, text: str, owner: str = "") -> dict | None:
+    """Add a line to an existing entry without resending its whole body.
+
+    Routes through `save` so the entry is re-embedded and re-extracted exactly as
+    a full write would be. Exists because rewriting `content` wholesale to add one
+    fact is the main way memories silently lose material — a model that has to
+    reproduce 2KB of text to append a sentence will eventually truncate it."""
+    entry = await get_entry(name, owner=owner)
+    if entry is None:
+        return None
+    addition = (text or "").strip()
+    if not addition:
+        return entry
+    content = f"{entry['content'].rstrip()}\n{addition}"
+    return await save(
+        name,
+        entry["type"],
+        entry["description"],
+        content,
+        owner=owner,
+        recall=entry["recall"],
+    )
+
+
 async def set_recall(name: str, recall: str, owner: str = "") -> str | None:
     """Move an existing entry between recall tiers without re-saving it through a
     model. Returns the tier actually applied, or None if there was no such entry.
