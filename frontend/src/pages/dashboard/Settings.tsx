@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { UserProfile } from "@clerk/clerk-react";
+import { UserProfile } from "@clerk/react";
 import { Check, Monitor, Moon, Sun, Settings as SettingsIcon } from "lucide-react";
 import { useTheme } from "@/lib/theme-context";
 import { useWorkspace } from "@/lib/workspace-context";

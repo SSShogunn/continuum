@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useUser } from "@clerk/clerk-react";
+import { useUser } from "@clerk/react";
 import { ShieldAlert, ShieldCheck } from "lucide-react";
 import { AuthShell } from "@/components/auth-shell";
 import { Button } from "@/components/ui/button";

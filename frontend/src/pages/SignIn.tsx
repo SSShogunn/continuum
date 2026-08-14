@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useSignIn } from "@clerk/clerk-react";
+import { useSignIn } from "@clerk/react";
 import { AuthShell } from "@/components/auth-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,17 +11,14 @@ import { GitHubIcon } from "@/components/auth/github-icon";
 
 type Step = "identifier" | "password" | "code";
 
-function errorMessage(err: unknown): string {
-  if (err && typeof err === "object" && "errors" in err) {
-    const errors = (err as { errors?: { longMessage?: string; message?: string }[] }).errors;
-    const first = errors?.[0];
-    if (first) return first.longMessage ?? first.message ?? "Something went wrong";
-  }
-  return "Something went wrong";
+type AuthError = { message?: string; longMessage?: string } | null;
+
+function errorMessage(error: AuthError): string {
+  return error?.longMessage ?? error?.message ?? "Something went wrong";
 }
 
 export default function SignInPage() {
-  const { isLoaded, signIn, setActive } = useSignIn();
+  const { signIn } = useSignIn();
   const navigate = useNavigate();
 
   const [step, setStep] = React.useState<Step>("identifier");
@@ -31,43 +28,48 @@ export default function SignInPage() {
   const [busy, setBusy] = React.useState(false);
   const [notice, setNotice] = React.useState<string | null>(null);
 
-  async function completeIfNeeded(status: string | null, createdSessionId: string | null) {
-    if (status === "complete" && createdSessionId) {
-      await setActive?.({ session: createdSessionId });
-      navigate("/dashboard");
-      return true;
-    }
-    return false;
+  const UNSUPPORTED_STEP =
+    "This account needs an additional verification step that isn't supported here yet. Please contact support.";
+
+  async function completeIfNeeded() {
+    if (signIn.status !== "complete") return false;
+    await signIn.finalize({ navigate: () => navigate("/dashboard") });
+    return true;
   }
 
   async function handleIdentifierSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!isLoaded) return;
     setBusy(true);
     setNotice(null);
     try {
-      const result = await signIn.create({ identifier });
-      if (await completeIfNeeded(result.status, result.createdSessionId)) return;
+      const { error } = await signIn.create({ identifier });
+      if (error) {
+        setNotice(errorMessage(error));
+        return;
+      }
+      if (await completeIfNeeded()) return;
 
-      const passwordFactor = result.supportedFirstFactors?.find((f) => f.strategy === "password");
-      if (passwordFactor) {
+      const factors = signIn.supportedFirstFactors ?? [];
+
+      if (factors.some((f) => f.strategy === "password")) {
         setStep("password");
         return;
       }
 
-      const emailCodeFactor = result.supportedFirstFactors?.find((f) => f.strategy === "email_code");
+      const emailCodeFactor = factors.find((f) => f.strategy === "email_code");
       if (emailCodeFactor && "emailAddressId" in emailCodeFactor) {
-        await signIn.prepareFirstFactor({
-          strategy: "email_code",
+        const sent = await signIn.emailCode.sendCode({
           emailAddressId: emailCodeFactor.emailAddressId,
         });
+        if (sent.error) {
+          setNotice(errorMessage(sent.error));
+          return;
+        }
         setStep("code");
         return;
       }
 
-      setNotice("This account needs an additional verification step that isn't supported here yet. Please contact support.");
-    } catch (err) {
-      setNotice(errorMessage(err));
+      setNotice(UNSUPPORTED_STEP);
     } finally {
       setBusy(false);
     }
@@ -75,16 +77,15 @@ export default function SignInPage() {
 
   async function handlePasswordSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!isLoaded) return;
     setBusy(true);
     setNotice(null);
     try {
-      const result = await signIn.attemptFirstFactor({ strategy: "password", password });
-      if (!(await completeIfNeeded(result.status, result.createdSessionId))) {
-        setNotice("This account needs an additional verification step that isn't supported here yet. Please contact support.");
+      const { error } = await signIn.password({ password });
+      if (error) {
+        setNotice(errorMessage(error));
+        return;
       }
-    } catch (err) {
-      setNotice(errorMessage(err));
+      if (!(await completeIfNeeded())) setNotice(UNSUPPORTED_STEP);
     } finally {
       setBusy(false);
     }
@@ -92,44 +93,32 @@ export default function SignInPage() {
 
   async function handleCodeSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!isLoaded) return;
     setBusy(true);
     setNotice(null);
     try {
-      const result = await signIn.attemptFirstFactor({ strategy: "email_code", code });
-      if (!(await completeIfNeeded(result.status, result.createdSessionId))) {
-        setNotice("This account needs an additional verification step that isn't supported here yet. Please contact support.");
+      const { error } = await signIn.emailCode.verifyCode({ code });
+      if (error) {
+        setNotice(errorMessage(error));
+        return;
       }
-    } catch (err) {
-      setNotice(errorMessage(err));
+      if (!(await completeIfNeeded())) setNotice(UNSUPPORTED_STEP);
     } finally {
       setBusy(false);
     }
   }
 
-  async function handleGoogle() {
-    if (!isLoaded) return;
+  async function handleSso(strategy: "oauth_google" | "oauth_github") {
+    setBusy(true);
+    setNotice(null);
     try {
-      await signIn.authenticateWithRedirect({
-        strategy: "oauth_google",
-        redirectUrl: "/sso-callback",
-        redirectUrlComplete: "/dashboard",
+      const { error } = await signIn.sso({
+        strategy,
+        redirectUrl: "/dashboard",
+        redirectCallbackUrl: "/sso-callback",
       });
-    } catch (err) {
-      console.error("Google sign-in failed:", err);
-    }
-  }
-
-  async function handleGithub() {
-    if (!isLoaded) return;
-    try {
-      await signIn.authenticateWithRedirect({
-        strategy: "oauth_github",
-        redirectUrl: "/sso-callback",
-        redirectUrlComplete: "/dashboard",
-      });
-    } catch (err) {
-      console.error("GitHub sign-in failed:", err);
+      if (error) setNotice(errorMessage(error));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -148,7 +137,7 @@ export default function SignInPage() {
         <Button
           type="button"
           variant="outline"
-          onClick={handleGoogle}
+          onClick={() => handleSso("oauth_google")}
           disabled={busy}
           className="w-full justify-center gap-2"
         >
@@ -159,7 +148,7 @@ export default function SignInPage() {
         <Button
           type="button"
           variant="outline"
-          onClick={handleGithub}
+          onClick={() => handleSso("oauth_github")}
           disabled={busy}
           className="w-full justify-center gap-2"
         >

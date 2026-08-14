@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { useUser, useClerk, UserButton } from "@clerk/clerk-react";
+import { useUser, useClerk, UserButton } from "@clerk/react";
 import { motion } from "motion/react";
 import {
   Database,

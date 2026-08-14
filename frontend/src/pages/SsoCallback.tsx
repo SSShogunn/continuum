@@ -1,4 +1,4 @@
-import { AuthenticateWithRedirectCallback } from "@clerk/clerk-react";
+import { AuthenticateWithRedirectCallback } from "@clerk/react";
 import { AuthShell } from "@/components/auth-shell";
 
 export default function SsoCallbackPage() {

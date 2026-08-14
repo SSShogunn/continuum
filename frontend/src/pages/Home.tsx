@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { useUser } from "@clerk/clerk-react";
+import { useUser } from "@clerk/react";
 import { ArrowRight, RotateCcw } from "lucide-react";
 import { ContinuumMark } from "@/components/continuum-mark";
 import styles from "./Home.module.css";

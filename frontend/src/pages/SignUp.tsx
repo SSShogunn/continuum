@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useSignUp } from "@clerk/clerk-react";
+import { useSignUp } from "@clerk/react";
 import { AuthShell } from "@/components/auth-shell";
 import { useTheme } from "@/lib/theme-context";
 import { Button } from "@/components/ui/button";
@@ -12,18 +12,15 @@ import { GitHubIcon } from "@/components/auth/github-icon";
 
 type Step = "details" | "code";
 
-function errorMessage(err: unknown): string {
-  if (err && typeof err === "object" && "errors" in err) {
-    const errors = (err as { errors?: { longMessage?: string; message?: string }[] }).errors;
-    const first = errors?.[0];
-    if (first) return first.longMessage ?? first.message ?? "Something went wrong";
-  }
-  return "Something went wrong";
+type AuthError = { message?: string; longMessage?: string } | null;
+
+function errorMessage(error: AuthError): string {
+  return error?.longMessage ?? error?.message ?? "Something went wrong";
 }
 
 export default function SignUpPage() {
   const { resolvedTheme } = useTheme();
-  const { isLoaded, signUp, setActive } = useSignUp();
+  const { signUp } = useSignUp();
   const navigate = useNavigate();
 
   const [step, setStep] = React.useState<Step>("details");
@@ -33,33 +30,38 @@ export default function SignUpPage() {
   const [busy, setBusy] = React.useState(false);
   const [notice, setNotice] = React.useState<string | null>(null);
 
-  async function completeIfNeeded(status: string | null, createdSessionId: string | null) {
-    if (status === "complete" && createdSessionId) {
-      await setActive?.({ session: createdSessionId });
-      navigate("/dashboard");
-      return true;
-    }
-    return false;
+  const UNSUPPORTED_STEP =
+    "This account needs an additional step that isn't supported here yet. Please contact support.";
+
+  async function completeIfNeeded() {
+    if (signUp.status !== "complete") return false;
+    await signUp.finalize({ navigate: () => navigate("/dashboard") });
+    return true;
   }
 
   async function handleDetailsSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!isLoaded) return;
     setBusy(true);
     setNotice(null);
     try {
-      const result = await signUp.create({ emailAddress, password });
-      if (await completeIfNeeded(result.status, result.createdSessionId)) return;
+      const { error } = await signUp.create({ emailAddress, password });
+      if (error) {
+        setNotice(errorMessage(error));
+        return;
+      }
+      if (await completeIfNeeded()) return;
 
-      if (result.unverifiedFields?.includes("email_address")) {
-        await signUp.prepareEmailAddressVerification({ strategy: "email_code" });
+      if (signUp.unverifiedFields?.includes("email_address")) {
+        const sent = await signUp.verifications.sendEmailCode();
+        if (sent.error) {
+          setNotice(errorMessage(sent.error));
+          return;
+        }
         setStep("code");
         return;
       }
 
-      setNotice("This account needs an additional step that isn't supported here yet. Please contact support.");
-    } catch (err) {
-      setNotice(errorMessage(err));
+      setNotice(UNSUPPORTED_STEP);
     } finally {
       setBusy(false);
     }
@@ -67,44 +69,32 @@ export default function SignUpPage() {
 
   async function handleCodeSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!isLoaded) return;
     setBusy(true);
     setNotice(null);
     try {
-      const result = await signUp.attemptEmailAddressVerification({ code });
-      if (!(await completeIfNeeded(result.status, result.createdSessionId))) {
-        setNotice("This account needs an additional step that isn't supported here yet. Please contact support.");
+      const { error } = await signUp.verifications.verifyEmailCode({ code });
+      if (error) {
+        setNotice(errorMessage(error));
+        return;
       }
-    } catch (err) {
-      setNotice(errorMessage(err));
+      if (!(await completeIfNeeded())) setNotice(UNSUPPORTED_STEP);
     } finally {
       setBusy(false);
     }
   }
 
-  async function handleGoogle() {
-    if (!isLoaded) return;
+  async function handleSso(strategy: "oauth_google" | "oauth_github") {
+    setBusy(true);
+    setNotice(null);
     try {
-      await signUp.authenticateWithRedirect({
-        strategy: "oauth_google",
-        redirectUrl: "/sso-callback",
-        redirectUrlComplete: "/dashboard",
+      const { error } = await signUp.sso({
+        strategy,
+        redirectUrl: "/dashboard",
+        redirectCallbackUrl: "/sso-callback",
       });
-    } catch (err) {
-      console.error("Google sign-up failed:", err);
-    }
-  }
-
-  async function handleGithub() {
-    if (!isLoaded) return;
-    try {
-      await signUp.authenticateWithRedirect({
-        strategy: "oauth_github",
-        redirectUrl: "/sso-callback",
-        redirectUrlComplete: "/dashboard",
-      });
-    } catch (err) {
-      console.error("GitHub sign-up failed:", err);
+      if (error) setNotice(errorMessage(error));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -123,7 +113,7 @@ export default function SignUpPage() {
         <Button
           type="button"
           variant="outline"
-          onClick={handleGoogle}
+          onClick={() => handleSso("oauth_google")}
           disabled={busy}
           className="w-full justify-center gap-2"
         >
@@ -134,7 +124,7 @@ export default function SignUpPage() {
         <Button
           type="button"
           variant="outline"
-          onClick={handleGithub}
+          onClick={() => handleSso("oauth_github")}
           disabled={busy}
           className="w-full justify-center gap-2"
         >
