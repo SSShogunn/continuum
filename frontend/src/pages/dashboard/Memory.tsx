@@ -7,6 +7,8 @@ import { useApiClient } from "@/lib/api-client";
 import { MemoryMarkdown } from "@/lib/markdown";
 import { extractLinks, hasUnlinkedMention, linkFirstMention } from "@/lib/wikilink";
 import { Button } from "@/components/ui/button";
+import { Page } from "@/components/page";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -412,24 +414,17 @@ export default function MemoryPage() {
 
   return (
     <>
-      <div className="flex flex-col h-[calc(100vh-3.75rem)]">
-        <div className="flex items-center justify-between gap-4 border-b px-6 py-3.5 shrink-0">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="flex size-8 items-center justify-center rounded-md bg-primary/10 text-primary shrink-0">
-              <Database className="size-4" />
-            </div>
-            <div className="min-w-0">
-              <h1 className="text-sm font-semibold leading-tight">Memory</h1>
-              <p className="text-xs text-muted-foreground truncate">
-                {loading ? "Loading…" : `${memory.length} entr${memory.length === 1 ? "y" : "ies"}`} in &quot;{workspace}&quot;
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0">
+      <Page
+        title="Memory"
+        description={`${loading ? "Loading…" : `${memory.length} entr${memory.length === 1 ? "y" : "ies"}`} in "${workspace}"`}
+        icon={Database}
+        fill
+        bleed
+        actions={
+          <>
             <button
               onClick={() => setSwitcherOpen(true)}
-              className="hidden md:flex h-8 items-center gap-2 rounded-md border px-2.5 text-xs text-muted-foreground hover:bg-accent"
+              className="hidden lg:flex h-8 items-center gap-2 rounded-md border px-2.5 text-xs text-muted-foreground hover:bg-accent"
             >
               <Search className="size-3.5" />
               Jump to…
@@ -437,7 +432,7 @@ export default function MemoryPage() {
                 <Command className="size-2.5" />K
               </kbd>
             </button>
-            <div className="relative">
+            <div className="relative hidden sm:block">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
               <Input
                 value={search}
@@ -453,11 +448,23 @@ export default function MemoryPage() {
               className="hidden"
               onChange={handleImportFile}
             />
-            <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={importing}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="hidden md:inline-flex"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={importing}
+            >
               <Upload />
               {importing ? "Importing…" : "Import"}
             </Button>
-            <Button variant="outline" size="sm" onClick={exportMemory} disabled={memory.length === 0}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="hidden md:inline-flex"
+              onClick={exportMemory}
+              disabled={memory.length === 0}
+            >
               <Download />
               Export
             </Button>
@@ -465,9 +472,9 @@ export default function MemoryPage() {
               <Plus />
               New
             </Button>
-          </div>
-        </div>
-
+          </>
+        }
+      >
         {importMessage && (
           <div className="border-b bg-muted/40 px-6 py-2 text-xs text-muted-foreground shrink-0">
             {importMessage}
@@ -610,7 +617,14 @@ export default function MemoryPage() {
 
         <div className="flex flex-1 min-h-0">
           {loading ? (
-            <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">Loading…</div>
+            <div className="w-full lg:w-[360px] shrink-0 lg:border-r">
+              {Array.from({ length: 9 }).map((_, i) => (
+                <div key={i} className="space-y-2 border-b px-6 py-3">
+                  <Skeleton className="h-3.5" style={{ width: `${45 + ((i * 17) % 40)}%` }} />
+                  <Skeleton className="h-3 w-full max-w-56" />
+                </div>
+              ))}
+            </div>
           ) : memory.length === 0 ? (
             <div className="flex-1 flex items-center justify-center px-6">
               <div className="text-center max-w-sm">
@@ -878,7 +892,7 @@ export default function MemoryPage() {
             </>
           )}
         </div>
-      </div>
+      </Page>
 
       <Dialog open={switcherOpen} onOpenChange={setSwitcherOpen}>
         <DialogContent className="top-[20%] translate-y-0 gap-0 p-0 sm:max-w-xl">

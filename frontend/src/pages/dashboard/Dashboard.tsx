@@ -14,9 +14,11 @@ import {
   Area,
 } from "recharts";
 import { Card, CardContent } from "@/components/ui/card";
+import { Page, Section } from "@/components/page";
+import { EmptyState, ErrorState, StatGridSkeleton, PanelSkeleton } from "@/components/states";
 import { relativeTime, stringToHue } from "@/lib/utils";
 import { useApiClient } from "@/lib/api-client";
-import { AlertTriangle, BarChart3, Gauge, Timer, Database, Share2 } from "lucide-react";
+import { AlertTriangle, BarChart3, Gauge, Timer, Database, Share2, Plug } from "lucide-react";
 
 const CHART_COLORS = [
   "var(--chart-1)",
@@ -214,30 +216,38 @@ export default function StatsPage() {
   const mostConnected = graphStats?.top_entities?.[0];
 
   return (
-    <div className="px-6 py-6 space-y-6">
-      <div>
-        <div className="flex items-center gap-2.5">
-          <div className="flex size-8 items-center justify-center rounded-md bg-primary/10 text-primary">
-            <BarChart3 className="size-4" />
-          </div>
-          <div>
-            <h1 className="text-sm font-semibold leading-tight">Overview</h1>
-            <p className="text-xs text-muted-foreground">Your Continuum usage across all clients</p>
+    <Page
+      title="Overview"
+      description="Your Continuum usage across all clients"
+      icon={BarChart3}
+    >
+      {loading ? (
+        <div className="space-y-10">
+          <StatGridSkeleton />
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <PanelSkeleton />
+            <PanelSkeleton />
           </div>
         </div>
-      </div>
-
-      {loading ? (
-        <p className="text-muted-foreground text-sm">Loading…</p>
       ) : error ? (
-        <p className="text-destructive text-sm">Failed to load stats: {error}</p>
+        <ErrorState title="Couldn't load your stats" description={error} />
       ) : !stats || stats.total_requests === 0 ? (
-        <p className="text-muted-foreground text-sm">
-          No tool calls yet — use your MCP token with an AI client to see activity here.
-        </p>
+        <EmptyState
+          icon={Plug}
+          title="No tool calls yet"
+          description="Once an AI client connects with your MCP token, its activity shows up here."
+          action={
+            <Link
+              to="/dashboard/connections"
+              className="inline-flex h-8 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              Connect a client
+            </Link>
+          }
+        />
       ) : (
-        <>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="space-y-10">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <StatCard
               label="Total calls"
               value={stats.total_requests}
@@ -261,8 +271,7 @@ export default function StatsPage() {
           </div>
 
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            <section>
-              <h3 className="text-sm font-medium text-muted-foreground mb-3">Calls (last 14 days)</h3>
+            <Section title="Calls (last 14 days)">
               <Card surface="chrome">
                 <CardContent className="h-64 pt-4">
                   <ResponsiveContainer width="100%" height="100%">
@@ -286,10 +295,9 @@ export default function StatsPage() {
                   </ResponsiveContainer>
                 </CardContent>
               </Card>
-            </section>
+            </Section>
 
-            <section>
-              <h3 className="text-sm font-medium text-muted-foreground mb-3">Calls by tool</h3>
+            <Section title="Calls by tool">
               <Card surface="chrome">
                 <CardContent className="h-64 pt-4">
                   <ResponsiveContainer width="100%" height="100%">
@@ -307,11 +315,10 @@ export default function StatsPage() {
                   </ResponsiveContainer>
                 </CardContent>
               </Card>
-            </section>
+            </Section>
           </div>
 
-          <section>
-            <h3 className="text-sm font-medium text-muted-foreground mb-3">Calls by tool over time</h3>
+          <Section title="Calls by tool over time">
             <Card surface="chrome">
               <CardContent className="h-64 pt-4">
                 <ResponsiveContainer width="100%" height="100%">
@@ -344,13 +351,12 @@ export default function StatsPage() {
                 </ResponsiveContainer>
               </CardContent>
             </Card>
-          </section>
+          </Section>
 
-          <section>
-            <h3 className="text-sm font-medium text-muted-foreground mb-3">Breakdown</h3>
+          <Section title="Breakdown">
             <Card surface="chrome">
-              <CardContent>
-                <table className="w-full text-sm">
+              <CardContent className="overflow-x-auto">
+                <table className="w-full min-w-[34rem] text-sm">
                   <thead>
                     <tr className="text-left text-muted-foreground border-b">
                       <th className="pb-2 font-medium">Tool</th>
@@ -372,16 +378,17 @@ export default function StatsPage() {
                 </table>
               </CardContent>
             </Card>
-          </section>
+          </Section>
 
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            <section>
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-medium text-muted-foreground">Recent errors</h3>
+            <Section
+              title="Recent errors"
+              action={
                 <Link to="/dashboard/activity" className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2">
                   View all
                 </Link>
-              </div>
+              }
+            >
               <Card surface="chrome">
                 <CardContent className="p-0">
                   {recentErrors.length === 0 ? (
@@ -404,10 +411,9 @@ export default function StatsPage() {
                   )}
                 </CardContent>
               </Card>
-            </section>
+            </Section>
 
-            <section>
-              <h3 className="text-sm font-medium text-muted-foreground mb-3">Memory breakdown</h3>
+            <Section title="Memory breakdown">
               <Card surface="chrome">
                 <CardContent className="space-y-3">
                   {!memoryStats || memoryStats.total_entries === 0 ? (
@@ -444,12 +450,11 @@ export default function StatsPage() {
                   )}
                 </CardContent>
               </Card>
-            </section>
+            </Section>
           </div>
 
-          <section>
-            <h3 className="text-sm font-medium text-muted-foreground mb-3">Graph</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <Section title="Graph">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <StatCard
                 label="Entities"
                 value={graphStats?.node_count ?? 0}
@@ -487,9 +492,9 @@ export default function StatsPage() {
                 </CardContent>
               </Card>
             </div>
-          </section>
-        </>
+          </Section>
+        </div>
       )}
-    </div>
+    </Page>
   );
 }

@@ -4,6 +4,8 @@ import { motion, AnimatePresence } from "motion/react";
 import { relativeTime, stringToHue } from "@/lib/utils";
 import { useApiClient } from "@/lib/api-client";
 import { Card, CardContent } from "@/components/ui/card";
+import { Page } from "@/components/page";
+import { EmptyState, ErrorState, RowsSkeleton } from "@/components/states";
 import {
   Select,
   SelectContent,
@@ -59,21 +61,15 @@ export default function ActivityPage() {
   );
 
   return (
-    <div className="px-6 py-6 space-y-6">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div className="flex items-center gap-2.5">
-          <div className="flex size-8 items-center justify-center rounded-md bg-primary/10 text-primary">
-            <ActivityIcon className="size-4" />
-          </div>
-          <div>
-            <h1 className="text-sm font-semibold leading-tight">Activity</h1>
-            <p className="text-xs text-muted-foreground">Recent tool calls across all clients</p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
+    <Page
+      title="Activity"
+      description="Recent tool calls across all clients"
+      icon={ActivityIcon}
+      width="content"
+      actions={
+        <>
           <Select value={toolFilter} onValueChange={(v) => setToolFilter(v ?? "all")}>
-            <SelectTrigger className="h-8 w-40 text-xs">
+            <SelectTrigger className="h-8 w-32 text-xs sm:w-40">
               <SelectValue placeholder="Tool" />
             </SelectTrigger>
             <SelectContent>
@@ -86,7 +82,7 @@ export default function ActivityPage() {
             </SelectContent>
           </Select>
           <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v ?? "all")}>
-            <SelectTrigger className="h-8 w-32 text-xs">
+            <SelectTrigger className="hidden h-8 w-32 text-xs sm:flex">
               <SelectValue placeholder="Status" />
             </SelectTrigger>
             <SelectContent>
@@ -95,20 +91,24 @@ export default function ActivityPage() {
               <SelectItem value="error">error</SelectItem>
             </SelectContent>
           </Select>
-        </div>
-      </div>
-
+        </>
+      }
+    >
+      <div className="space-y-8">
       {loading ? (
-        <p className="text-muted-foreground text-sm">Loading…</p>
+        <RowsSkeleton />
       ) : error ? (
-        <p className="text-destructive text-sm">Failed to load activity: {error}</p>
+        <ErrorState title="Couldn't load activity" description={error} />
       ) : rows.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-          <div className="mx-auto mb-3 flex size-11 items-center justify-center rounded-full bg-muted text-muted-foreground">
-            <Inbox className="size-5" />
-          </div>
-          <p className="text-muted-foreground text-sm">No tool calls match this filter yet.</p>
-        </div>
+        <EmptyState
+          icon={Inbox}
+          title="Nothing to show"
+          description={
+            toolFilter === "all" && statusFilter === "all"
+              ? "Tool calls from your connected clients will appear here as they happen."
+              : "No tool calls match these filters. Try widening them."
+          }
+        />
       ) : (
         <Card surface="chrome">
           <CardContent className="p-0">
@@ -201,6 +201,7 @@ export default function ActivityPage() {
       <p className="text-xs text-muted-foreground">
         See the <Link to="/dashboard" className="underline underline-offset-2">Stats</Link> page for aggregate trends.
       </p>
-    </div>
+      </div>
+    </Page>
   );
 }

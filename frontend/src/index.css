@@ -49,12 +49,15 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  --container-page: 88rem;
+  --container-page-content: 64rem;
+  --container-page-narrow: 46rem;
 }
 
 :root {
   --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-  --background: #dfe1e3;
+  --background: #e3e1dc;
   --foreground: #201c17;
   --card: #f9f7ef;
   --card-foreground: #201c17;
@@ -62,14 +65,14 @@
   --popover-foreground: #201c17;
   --primary: #d6472f;
   --primary-foreground: #f9f7ef;
-  --secondary: #e4d5ae;
-  --secondary-foreground: #4a3d22;
-  --muted: #ddd6c2;
-  --muted-foreground: #6b6455;
-  --accent: #ddcda0;
+  --secondary: #dcd8d0;
+  --secondary-foreground: #3a352c;
+  --muted: #eae7de;
+  --muted-foreground: #6a6459;
+  --accent: #e9e0cb;
   --accent-foreground: #3d3218;
   --destructive: #b3261e;
-  --border: rgba(32, 28, 23, 0.14);
+  --border: rgba(32, 28, 23, 0.13);
   --input: rgba(32, 28, 23, 0.16);
   --ring: rgba(214, 71, 47, 0.5);
   --manila: #c9a66b;
@@ -81,13 +84,13 @@
   --chart-4: #7a5a8a;
   --chart-5: #3d6b8a;
   --radius: 0.3rem;
-  --sidebar: #d5d8da;
+  --sidebar: #d4d1ca;
   --sidebar-foreground: #201c17;
   --sidebar-primary: #d6472f;
   --sidebar-primary-foreground: #f9f7ef;
-  --sidebar-accent: #ddcda0;
+  --sidebar-accent: #e6dcc4;
   --sidebar-accent-foreground: #3d3218;
-  --sidebar-border: rgba(32, 28, 23, 0.14);
+  --sidebar-border: rgba(32, 28, 23, 0.16);
   --sidebar-ring: rgba(214, 71, 47, 0.5);
 }
 
@@ -119,7 +122,7 @@
   --chart-4: #a184b3;
   --chart-5: #6b9bc2;
   --radius: 0.3rem;
-  --sidebar: #1a1c1f;
+  --sidebar: #141619;
   --sidebar-foreground: #f2efe6;
   --sidebar-primary: #e0563c;
   --sidebar-primary-foreground: #f9f7ef;
@@ -152,8 +155,9 @@
 
   [data-slot="card"] {
     box-shadow:
-      0 1px 0 rgba(255, 255, 255, 0.35) inset,
-      0 1px 2px rgba(0, 0, 0, 0.06);
+      0 1px 0 rgba(255, 255, 255, 0.5) inset,
+      0 1px 2px -1px rgba(32, 28, 23, 0.1),
+      0 5px 14px -8px rgba(32, 28, 23, 0.16);
   }
 
   .dark [data-slot="card"] {

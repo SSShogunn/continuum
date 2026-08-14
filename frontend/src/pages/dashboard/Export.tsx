@@ -7,6 +7,9 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Page } from "@/components/page";
+import { Skeleton } from "@/components/ui/skeleton";
+import { FileOutput } from "lucide-react";
 
 interface MemoryEntry {
   name: string;
@@ -112,14 +115,17 @@ export default function ExportPage() {
     (mode === "entity" && entity.trim().length > 0);
 
   return (
-    <main className="max-w-4xl mx-auto px-6 py-10 space-y-8">
-      <div>
-        <h2 className="text-xl font-semibold mb-1">Export prompt</h2>
-        <p className="text-muted-foreground text-sm">
-          Assemble your memories and knowledge graph into a plain-text prompt you can paste into
-          any AI tool, without connecting Continuum via MCP.
-        </p>
-      </div>
+    <Page
+      title="Export prompt"
+      description="Build a paste-ready prompt from your memory"
+      icon={FileOutput}
+      width="content"
+    >
+      <div className="space-y-8">
+      <p className="max-w-prose text-sm text-muted-foreground">
+        Assemble your memories and knowledge graph into a plain-text prompt you can paste into
+        any AI tool, without connecting Continuum via MCP.
+      </p>
 
       <Tabs value={mode} onValueChange={(v) => setMode(v as Mode)}>
         <TabsList>
@@ -147,7 +153,17 @@ export default function ExportPage() {
         <TabsContent value="select">
           <div className="mt-3 space-y-2 max-h-80 overflow-y-auto">
             {!entriesLoaded ? (
-              <p className="text-muted-foreground text-sm">Loading…</p>
+              <div className="space-y-2">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="flex items-start gap-2 rounded-md border px-3 py-2">
+                    <Skeleton className="mt-1 size-3.5 shrink-0 rounded-sm" />
+                    <div className="min-w-0 flex-1 space-y-1.5">
+                      <Skeleton className="h-3 w-32" />
+                      <Skeleton className="h-3 w-full max-w-64" />
+                    </div>
+                  </div>
+                ))}
+              </div>
             ) : entries.length === 0 ? (
               <p className="text-muted-foreground text-sm">No memory entries in this workspace.</p>
             ) : (
@@ -206,6 +222,7 @@ export default function ExportPage() {
           </CardContent>
         </Card>
       )}
-    </main>
+      </div>
+    </Page>
   );
 }
