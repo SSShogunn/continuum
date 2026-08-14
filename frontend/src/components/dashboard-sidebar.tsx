@@ -27,6 +27,7 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -39,14 +40,30 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { ContinuumMark } from "@/components/continuum-mark";
 import { useOnboarding } from "@/lib/onboarding-context";
 
-const NAV_LINKS = [
-  { href: "/dashboard", label: "Stats", icon: BarChart3, gated: true, adminOnly: false },
-  { href: "/dashboard/activity", label: "Activity", icon: Activity, gated: true, adminOnly: false },
-  { href: "/dashboard/memory", label: "Memory", icon: Database, gated: true, adminOnly: false },
-  { href: "/dashboard/memory-graph", label: "Graph", icon: Share2, gated: true, adminOnly: false },
-  { href: "/dashboard/export", label: "Export", icon: FileOutput, gated: true, adminOnly: false },
-  { href: "/dashboard/connections", label: "Connections", icon: Plug, gated: false, adminOnly: false },
-  { href: "/dashboard/admin", label: "Admin", icon: ShieldCheck, gated: false, adminOnly: true },
+const NAV_GROUPS = [
+  {
+    label: "Insights",
+    links: [
+      { href: "/dashboard", label: "Overview", icon: BarChart3, gated: true, adminOnly: false },
+      { href: "/dashboard/activity", label: "Activity", icon: Activity, gated: true, adminOnly: false },
+    ],
+  },
+  {
+    label: "Memory",
+    links: [
+      { href: "/dashboard/memory", label: "Entries", icon: Database, gated: true, adminOnly: false },
+      { href: "/dashboard/memory-graph", label: "Graph", icon: Share2, gated: true, adminOnly: false },
+      { href: "/dashboard/export", label: "Export", icon: FileOutput, gated: true, adminOnly: false },
+    ],
+  },
+  {
+    label: "Setup",
+    links: [
+      { href: "/dashboard/connections", label: "Connections", icon: Plug, gated: false, adminOnly: false },
+      { href: "/dashboard/settings", label: "Settings", icon: SettingsIcon, gated: false, adminOnly: false },
+      { href: "/dashboard/admin", label: "Admin", icon: ShieldCheck, gated: false, adminOnly: true },
+    ],
+  },
 ];
 
 export function DashboardSidebar() {
@@ -72,84 +89,79 @@ export function DashboardSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {NAV_LINKS.map((link) => {
-                const active =
-                  link.href === "/dashboard"
-                    ? pathname === "/dashboard"
-                    : pathname.startsWith(link.href);
-                const lockedForAdmin = link.adminOnly && !isAdmin;
-                const disabled = (link.gated && isNewUser) || lockedForAdmin;
+        {NAV_GROUPS.map((group) => {
+          const visible = group.links.filter((link) => !(link.adminOnly && !isAdmin));
+          if (visible.length === 0) return null;
 
-                if (disabled) {
-                  return (
-                    <SidebarMenuItem key={link.href}>
-                      <SidebarMenuButton
-                        disabled
-                        tooltip={lockedForAdmin ? "Admin access required" : "Connect a client first"}
-                        className="relative cursor-not-allowed opacity-50"
-                      >
-                        <link.icon className="relative" />
-                        <span className="relative">{link.label}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                }
+          return (
+            <SidebarGroup key={group.label}>
+              <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {visible.map((link) => {
+                    const active =
+                      link.href === "/dashboard"
+                        ? pathname === "/dashboard"
+                        : pathname.startsWith(link.href);
+                    const disabled = link.gated && isNewUser;
 
-                return (
-                  <SidebarMenuItem key={link.href}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={active}
-                      tooltip={link.label}
-                      className="relative data-active:bg-transparent"
-                    >
-                      <Link to={link.href}>
-                        {active && (
-                          <motion.span
-                            layoutId="sidebar-active-pill"
-                            className="absolute inset-0 rounded-md bg-sidebar-accent"
-                            transition={{ duration: 0.15, ease: "easeOut" }}
-                          />
-                        )}
-                        <link.icon className="relative" />
-                        <span className="relative flex items-center gap-1.5">
-                          {link.label}
-                          {link.href === "/dashboard/connections" && isNewUser && (
-                            <span
-                              className="size-1.5 rounded-full bg-primary animate-pulse"
-                              aria-label="Start here"
-                            />
-                          )}
-                        </span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+                    if (disabled) {
+                      return (
+                        <SidebarMenuItem key={link.href}>
+                          <SidebarMenuButton
+                            disabled
+                            tooltip="Connect a client first"
+                            className="relative cursor-not-allowed opacity-50"
+                          >
+                            <link.icon className="relative" />
+                            <span className="relative">{link.label}</span>
+                          </SidebarMenuButton>
+                        </SidebarMenuItem>
+                      );
+                    }
+
+                    return (
+                      <SidebarMenuItem key={link.href}>
+                        <SidebarMenuButton
+                          asChild
+                          isActive={active}
+                          tooltip={link.label}
+                          className="relative data-active:bg-transparent"
+                        >
+                          <Link to={link.href}>
+                            {active && (
+                              <motion.span
+                                layoutId="sidebar-active-pill"
+                                className="absolute inset-0 rounded-md bg-sidebar-accent"
+                                transition={{ duration: 0.15, ease: "easeOut" }}
+                              />
+                            )}
+                            <link.icon className="relative" />
+                            <span className="relative flex items-center gap-1.5">
+                              {link.label}
+                              {link.href === "/dashboard/connections" && isNewUser && (
+                                <span
+                                  className="size-1.5 rounded-full bg-primary animate-pulse"
+                                  aria-label="Start here"
+                                />
+                              )}
+                            </span>
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  })}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          );
+        })}
       </SidebarContent>
 
       <SidebarSeparator />
 
       <SidebarFooter>
         <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              asChild
-              isActive={pathname.startsWith("/dashboard/settings")}
-              tooltip="Settings"
-            >
-              <Link to="/dashboard/settings">
-                <SettingsIcon />
-                <span>Settings</span>
-              </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton asChild tooltip="GitHub">
               <a href="https://github.com/SSShogunn/continuum" target="_blank" rel="noopener noreferrer">

@@ -6,7 +6,7 @@ import type {
   GraphEdge as ReaGraphEdge,
   Theme as ReaGraphTheme,
 } from "reagraph";
-import { Maximize, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
+import { Maximize, RotateCcw, ZoomIn, ZoomOut, Share2 } from "lucide-react";
 import { useWorkspace } from "@/lib/workspace-context";
 import { useTheme } from "@/lib/theme-context";
 import { useApiClient } from "@/lib/api-client";
@@ -14,6 +14,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { ErrorBoundary } from "@/components/error-boundary";
+import { Page } from "@/components/page";
 
 // troika-three-text's WebGL SDF text renderer throws an uncaught rejection
 // instead of degrading quietly when ANGLE_instanced_arrays is unavailable
@@ -252,23 +253,28 @@ export default function MemoryGraphPage() {
   }
 
   return (
-    <main className="px-6 py-6 h-[calc(100vh-3.75rem)] flex flex-col">
-      <div className="flex items-center justify-between mb-4 gap-4 shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <h2 className="text-xl font-semibold shrink-0">Memory graph</h2>
-          {!labelsSupported && (
-            <span className="text-muted-foreground text-xs truncate" title="A WebGL feature the node labels need isn't available on this GPU — click a node to see its name instead.">
-              (labels unavailable in this browser)
-            </span>
-          )}
-        </div>
+    <Page
+      title="Memory graph"
+      description="Entities and relationships across your memory"
+      icon={Share2}
+      fill
+      actions={
         <Input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search entities…"
-          className="max-w-xs"
+          className="h-8 w-40 text-xs sm:w-56"
         />
-      </div>
+      }
+    >
+      {!labelsSupported && (
+        <p
+          className="mb-3 shrink-0 text-xs text-muted-foreground"
+          title="A WebGL feature the node labels need isn't available on this GPU — click a node to see its name instead."
+        >
+          Node labels are unavailable on this GPU — click a node to see its name.
+        </p>
+      )}
 
       <div className="flex items-center flex-wrap gap-1.5 mb-4 text-xs shrink-0">
         <span className="text-muted-foreground uppercase tracking-wide mr-0.5">Entities</span>
@@ -369,6 +375,6 @@ export default function MemoryGraphPage() {
           )}
         </AnimatePresence>
       </div>
-    </main>
+    </Page>
   );
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { UserProfile } from "@clerk/clerk-react";
-import { Check, Monitor, Moon, Sun } from "lucide-react";
+import { Check, Monitor, Moon, Sun, Settings as SettingsIcon } from "lucide-react";
 import { useTheme } from "@/lib/theme-context";
 import { useWorkspace } from "@/lib/workspace-context";
 import { useApiClient } from "@/lib/api-client";
@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Page } from "@/components/page";
 import {
   Dialog,
   DialogContent,
@@ -294,8 +295,12 @@ export default function SettingsPage() {
   const [tab, setTab] = useState("profile");
 
   return (
-    <main className="max-w-4xl mx-auto px-6 py-10">
-      <h2 className="text-xl font-semibold mb-6">Settings</h2>
+    <Page
+      title="Settings"
+      description="Profile, preferences, and API tokens"
+      icon={SettingsIcon}
+      width="content"
+    >
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
@@ -326,6 +331,6 @@ export default function SettingsPage() {
           <DangerZoneTab />
         </TabsContent>
       </Tabs>
-    </main>
+    </Page>
   );
 }

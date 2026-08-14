@@ -5,6 +5,10 @@ import { maskSecret } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
+import { Page, Section } from "@/components/page";
+import { ErrorState } from "@/components/states";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Plug } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -35,8 +39,7 @@ function GettingStarted() {
   }
 
   return (
-    <section>
-      <h2 className="text-xl font-semibold mb-4">Getting started</h2>
+    <Section title="Getting started">
       <div className="space-y-3">
         <Card>
           <CardContent className="space-y-2">
@@ -64,7 +67,7 @@ function GettingStarted() {
           </CardContent>
         </Card>
       </div>
-    </section>
+    </Section>
   );
 }
 
@@ -183,11 +186,16 @@ export default function ConnectionsPage() {
 
   return (
     <>
-      <main className="max-w-3xl mx-auto px-6 py-10 space-y-10">
+      <Page
+        title="Connections"
+        description="Connect MCP clients and manage access tokens"
+        icon={Plug}
+        width="narrow"
+      >
+        <div className="space-y-10">
         <GettingStarted />
 
-        <section>
-          <h2 className="text-xl font-semibold mb-4">Auto-context</h2>
+        <Section title="Auto-context">
           <Card>
             <CardContent className="space-y-4">
               <div className="flex items-center justify-between gap-4">
@@ -210,15 +218,18 @@ export default function ConnectionsPage() {
               </Button>
             </CardContent>
           </Card>
-        </section>
+        </Section>
 
-        <section>
-          <h2 className="text-xl font-semibold mb-4">Connected clients</h2>
+        <Section title="Connected clients">
 
           {loading ? (
-            <p className="text-muted-foreground text-sm">Loading…</p>
+            <div className="space-y-2">
+              <Skeleton className="h-4 w-40" />
+              <Skeleton className="h-4 w-64" />
+              <Skeleton className="h-4 w-52" />
+            </div>
           ) : error ? (
-            <p className="text-destructive text-sm">Failed to load connections: {error}</p>
+            <ErrorState title="Couldn't load connections" description={error} className="py-10" />
           ) : connections.length === 0 ? (
             <p className="text-muted-foreground text-sm">
               No connected clients yet — connect Claude.ai or Claude Code via OAuth to see them here.
@@ -244,11 +255,10 @@ export default function ConnectionsPage() {
               ))}
             </div>
           )}
-        </section>
+        </Section>
 
         {!loading && !error && manualTokens.length > 0 && (
-          <section>
-            <h2 className="text-xl font-semibold mb-4">Manual tokens</h2>
+          <Section title="Manual tokens">
             <p className="text-muted-foreground text-sm mb-3">
               Tokens generated directly from the dashboard, not tied to an OAuth client.
             </p>
@@ -264,9 +274,10 @@ export default function ConnectionsPage() {
                 )}
               </CardContent>
             </Card>
-          </section>
+          </Section>
         )}
-      </main>
+        </div>
+      </Page>
 
       <Dialog open={installOpen} onOpenChange={setInstallOpen}>
         <DialogContent>

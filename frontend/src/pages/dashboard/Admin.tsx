@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { ApiError, useApiClient } from "@/lib/api-client";
 import { Card, CardContent } from "@/components/ui/card";
+import { Page, Section } from "@/components/page";
+import { EmptyState, StatGridSkeleton } from "@/components/states";
 import { Badge } from "@/components/ui/badge";
 import { AlertTriangle, Gauge, Percent, ShieldCheck, Users } from "lucide-react";
 
@@ -80,26 +82,21 @@ export default function AdminPage() {
   }, [api]);
 
   return (
-    <div className="px-6 py-6 space-y-6">
-      <div className="flex items-center gap-2.5">
-        <div className="flex size-8 items-center justify-center rounded-md bg-primary/10 text-primary">
-          <ShieldCheck className="size-4" />
-        </div>
-        <div>
-          <h1 className="text-sm font-semibold leading-tight">Admin</h1>
-          <p className="text-xs text-muted-foreground">Global usage stats and account list</p>
-        </div>
-      </div>
-
+    <Page title="Admin" description="Global usage stats and account list" icon={ShieldCheck}>
+      <div className="space-y-10">
       {loading ? (
-        <p className="text-muted-foreground text-sm">Loading…</p>
+        <StatGridSkeleton />
       ) : forbidden ? (
-        <p className="text-muted-foreground text-sm">You don&apos;t have permission to view this page.</p>
+        <EmptyState
+          icon={ShieldCheck}
+          title="Admin access required"
+          description="Your account doesn't have permission to view global usage stats."
+        />
       ) : (
         <>
           {stats && (
             <>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <StatCard
                   label="Total requests"
                   value={stats.total_requests}
@@ -122,11 +119,10 @@ export default function AdminPage() {
               </div>
 
               {stats.per_tool.length > 0 && (
-                <section>
-                  <h3 className="text-sm font-medium text-muted-foreground mb-3">Breakdown by tool</h3>
+                <Section title="Breakdown by tool">
                   <Card surface="chrome">
-                    <CardContent>
-                      <table className="w-full text-sm">
+                    <CardContent className="overflow-x-auto">
+                      <table className="w-full min-w-[34rem] text-sm">
                         <thead>
                           <tr className="text-left text-muted-foreground border-b">
                             <th className="pb-2 font-medium">Tool</th>
@@ -148,24 +144,18 @@ export default function AdminPage() {
                       </table>
                     </CardContent>
                   </Card>
-                </section>
+                </Section>
               )}
             </>
           )}
 
-          <section>
-            <h3 className="text-sm font-medium text-muted-foreground mb-3">Users ({users.length})</h3>
+          <Section title={`Users (${users.length})`}>
             {users.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-center">
-                <div className="mx-auto mb-3 flex size-11 items-center justify-center rounded-full bg-muted text-muted-foreground">
-                  <Users className="size-5" />
-                </div>
-                <p className="text-muted-foreground text-sm">No users yet.</p>
-              </div>
+              <EmptyState icon={Users} title="No users yet" />
             ) : (
               <Card surface="chrome">
-                <CardContent>
-                  <table className="w-full text-sm">
+                <CardContent className="overflow-x-auto">
+                  <table className="w-full min-w-[34rem] text-sm">
                     <thead>
                       <tr className="text-left text-muted-foreground border-b">
                         <th className="pb-2 font-medium">Email</th>
@@ -198,9 +188,10 @@ export default function AdminPage() {
                 </CardContent>
               </Card>
             )}
-          </section>
+          </Section>
         </>
       )}
-    </div>
+      </div>
+    </Page>
   );
 }
