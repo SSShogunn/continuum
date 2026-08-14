@@ -1,101 +1,49 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import type {
-  GraphCanvasRef,
-  GraphNode as ReaGraphNode,
-  GraphEdge as ReaGraphEdge,
-  Theme as ReaGraphTheme,
-} from "reagraph";
-import { Maximize, RotateCcw, ZoomIn, ZoomOut, Share2 } from "lucide-react";
+import {
+  ArrowLeftRight,
+  ArrowRight,
+  Locate,
+  Maximize2,
+  PanelLeft,
+  RotateCcw,
+  Search,
+  Share2,
+  X,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react";
 import { useWorkspace } from "@/lib/workspace-context";
 import { useTheme } from "@/lib/theme-context";
 import { useApiClient } from "@/lib/api-client";
-import { Card, CardContent } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorBoundary } from "@/components/error-boundary";
+import { EmptyState, ErrorState } from "@/components/states";
 import { Page } from "@/components/page";
+import {
+  ForceGraph,
+  type ForceGraphHandle,
+  type GraphEdgeInput,
+  type GraphNodeInput,
+} from "@/components/graph/force-graph";
+import {
+  ENTITY_TYPES,
+  ENTITY_TYPE_DESCRIPTIONS,
+  entityColor,
+} from "@/components/graph/entity-palette";
 
-// troika-three-text's WebGL SDF text renderer throws an uncaught rejection
-// instead of degrading quietly when ANGLE_instanced_arrays is unavailable
-// (software rendering, some VMs/integrated GPUs) — swallow just that failure
-// so it can't take down the whole dashboard.
-function useSuppressWebglTextErrors() {
-  useEffect(() => {
-    function onRejection(event: PromiseRejectionEvent) {
-      const message = String(event.reason?.message ?? event.reason ?? "");
-      if (message.includes("ANGLE_instanced_arrays") || message.includes("WebGL SDF generation")) {
-        event.preventDefault();
-      }
-    }
-    window.addEventListener("unhandledrejection", onRejection);
-    return () => window.removeEventListener("unhandledrejection", onRejection);
-  }, []);
-}
-
-function GraphUnsupportedFallback() {
-  return (
-    <div className="flex h-full items-center justify-center p-6 text-center">
-      <p className="text-muted-foreground text-sm max-w-sm">
-        The graph view couldn&apos;t start 3D rendering in this browser. Try a different browser or
-        device — this is usually a missing WebGL feature, not a data problem.
-      </p>
-    </div>
-  );
-}
-
-// troika-three-text's floating labels use their own implicit offscreen canvas for
-// SDF text generation, and webgl-sdf-generator hardcodes a plain WebGL1 context for
-// it (`canvas.getContext('webgl', { depth: false })`) regardless of what the main
-// 3D scene uses — it never requests WebGL2. On hybrid-GPU laptops that offscreen
-// canvas can land on a different GPU (often the integrated one) than the visible
-// canvas, with different WebGL1 extension support, so a general WebGL2-capability
-// check doesn't predict this. Replicate the library's own context creation exactly
-// and check for the specific extension (ANGLE_instanced_arrays) it needs; troika's
-// own JS fallback for a missing extension is itself broken and throws instead of
-// degrading, so this is checked and avoided up front rather than caught after the
-// fact. Every other graph feature (nodes, edges, click-to-inspect) works without labels.
-function detectGraphLabelSupport(): boolean {
-  try {
-    const canvas = document.createElement("canvas");
-    const gl = canvas.getContext("webgl", { depth: false }) as WebGLRenderingContext | null;
-    return !!gl?.getExtension("ANGLE_instanced_arrays");
-  } catch {
-    return false;
-  }
-}
-
-function useLabelsSupported() {
-  const [supported, setSupported] = useState(true);
-  useEffect(() => {
-    setSupported(detectGraphLabelSupport());
-  }, []);
-  return supported;
-}
-
-const GraphCanvas = lazy(() => import("reagraph").then((m) => ({ default: m.GraphCanvas })));
-
-const CONTROL_BUTTON_CLASS =
-  "flex items-center justify-center rounded-md border bg-secondary/40 size-8 hover:bg-secondary transition-colors";
-
-function useReagraphTheme(resolvedTheme: "light" | "dark") {
-  const [themes, setThemes] = useState<{ light: ReaGraphTheme; dark: ReaGraphTheme } | null>(null);
-
-  useEffect(() => {
-    import("reagraph").then((m) => setThemes({ light: m.lightTheme, dark: m.darkTheme }));
-  }, []);
-
-  return themes?.[resolvedTheme];
-}
-
-interface GraphNode {
+interface ApiNode {
   id: number;
   name: string;
   type: string;
   summary: string;
 }
 
-interface GraphEdge {
+interface ApiEdge {
   id: number;
   source: number;
   target: number;
@@ -104,144 +52,184 @@ interface GraphEdge {
   episode_name: string;
 }
 
-interface Connection {
+interface Relation {
+  id: string;
   predicate: string;
-  other: string;
+  otherId: string;
+  otherName: string;
+  otherType: string;
   outgoing: boolean;
   fact: string;
-  episode_name: string;
+  episode: string;
 }
 
-interface NodeData {
-  type: string;
-  summary: string;
-  connections: Connection[];
-}
-
-// One colour per entity type in the taxonomy (taxonomy.py).
-const ENTITY_TYPE_COLORS: Record<string, string> = {
-  person: "#60a5fa",
-  organization: "#c084fc",
-  place: "#4ade80",
-  machine: "#22d3ee",
-  service: "#f472b6",
-  technology: "#facc15",
-  config: "#fb923c",
-  network: "#2dd4bf",
-  project: "#818cf8",
-  task: "#f87171",
-  event: "#a3e635",
-  concept: "#9ca3af",
-};
-
-const DEFAULT_COLOR = "#9ca3af";
-
-function buildGraph(
-  nodes: GraphNode[],
-  edges: GraphEdge[],
-  hiddenTypes: Set<string>
-): { nodes: ReaGraphNode[]; edges: ReaGraphEdge[] } {
-  const visible = nodes.filter((n) => !hiddenTypes.has(n.type));
-  const visibleIds = new Set(visible.map((n) => n.id));
-  const nameById = new Map(nodes.map((n) => [n.id, n.name]));
-
-  const connections = new Map<number, Connection[]>();
-  const degree = new Map<number, number>();
-  const graphEdges: ReaGraphEdge[] = [];
-
-  for (const e of edges) {
-    if (!visibleIds.has(e.source) || !visibleIds.has(e.target)) continue;
-    degree.set(e.source, (degree.get(e.source) ?? 0) + 1);
-    degree.set(e.target, (degree.get(e.target) ?? 0) + 1);
-    graphEdges.push({
-      id: String(e.id),
-      source: String(e.source),
-      target: String(e.target),
-      label: e.predicate,
-    });
-    if (!connections.has(e.source)) connections.set(e.source, []);
-    if (!connections.has(e.target)) connections.set(e.target, []);
-    connections.get(e.source)!.push({
-      predicate: e.predicate,
-      other: nameById.get(e.target) ?? "?",
-      outgoing: true,
-      fact: e.fact,
-      episode_name: e.episode_name,
-    });
-    connections.get(e.target)!.push({
-      predicate: e.predicate,
-      other: nameById.get(e.source) ?? "?",
-      outgoing: false,
-      fact: e.fact,
-      episode_name: e.episode_name,
-    });
-  }
-
-  const graphNodes: ReaGraphNode[] = visible.map((n) => ({
-    id: String(n.id),
-    label: n.name,
-    fill: ENTITY_TYPE_COLORS[n.type] ?? DEFAULT_COLOR,
-    size: 5 + Math.min((degree.get(n.id) ?? 0) * 1.5, 15),
-    data: {
-      type: n.type,
-      summary: n.summary,
-      connections: connections.get(n.id) ?? [],
-    } as NodeData,
-  }));
-
-  return { nodes: graphNodes, edges: graphEdges };
+function readablePredicate(predicate: string) {
+  return predicate.replace(/_/g, " ").toLowerCase();
 }
 
 export default function MemoryGraphPage() {
-  useSuppressWebglTextErrors();
   const api = useApiClient();
   const { workspace, setWorkspaces } = useWorkspace();
   const { resolvedTheme } = useTheme();
-  const reagraphTheme = useReagraphTheme(resolvedTheme);
-  const labelsSupported = useLabelsSupported();
-  const [nodes, setNodes] = useState<GraphNode[]>([]);
-  const [edges, setEdges] = useState<GraphEdge[]>([]);
-  const [selected, setSelected] = useState<{ label: string; data: NodeData } | null>(null);
+
+  const [nodes, setNodes] = useState<ApiNode[]>([]);
+  const [edges, setEdges] = useState<ApiEdge[]>([]);
+  const [loadedWorkspace, setLoadedWorkspace] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
+  // Below lg the rail overlays the plot, so it starts closed there rather than
+  // covering the graph the user came to look at.
+  const [railOpen, setRailOpen] = useState(
+    () => typeof window === "undefined" || window.matchMedia("(min-width: 1024px)").matches
+  );
+
+  const graphHandle = useRef<ForceGraphHandle | null>(null);
+  const railListRef = useRef<HTMLDivElement | null>(null);
+
+  const loading = loadedWorkspace !== workspace && error === null;
 
   useEffect(() => {
+    let cancelled = false;
+    setError(null);
     api
-      .get<{ nodes: GraphNode[]; edges: GraphEdge[]; workspaces: string[] }>(
+      .get<{ nodes: ApiNode[]; edges: ApiEdge[]; workspaces: string[] }>(
         `/api/memory/graph?workspace=${encodeURIComponent(workspace)}`
       )
       .then((data) => {
+        if (cancelled) return;
         setNodes(data.nodes ?? []);
         setEdges(data.edges ?? []);
         setWorkspaces(data.workspaces ?? ["default"]);
-        setSelected(null);
+        setSelectedId(null);
+        setLoadedWorkspace(workspace);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : String(err));
       });
+    return () => {
+      cancelled = true;
+    };
   }, [workspace, setWorkspaces, api]);
 
-  // Only show legend toggles for types actually present in the graph.
-  const presentTypes = useMemo(() => {
-    const set = new Set(nodes.map((n) => n.type));
-    return Object.keys(ENTITY_TYPE_COLORS).filter((t) => set.has(t));
+  const typeCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const n of nodes) counts.set(n.type, (counts.get(n.type) ?? 0) + 1);
+    return counts;
   }, [nodes]);
 
-  const graph = useMemo(
-    () => buildGraph(nodes, edges, hiddenTypes),
-    [nodes, edges, hiddenTypes]
+  // Taxonomy order first so the legend never reshuffles, then anything the
+  // extractor produced that the frontend taxonomy hasn't caught up with.
+  const presentTypes = useMemo(() => {
+    const known = new Set<string>(ENTITY_TYPES);
+    return [
+      ...ENTITY_TYPES.filter((t) => typeCounts.has(t)),
+      ...[...typeCounts.keys()].filter((t) => !known.has(t)).sort(),
+    ];
+  }, [typeCounts]);
+
+  const visible = useMemo(() => {
+    const visibleNodes = nodes.filter((n) => !hiddenTypes.has(n.type));
+    const ids = new Set(visibleNodes.map((n) => n.id));
+    const visibleEdges = edges.filter((e) => ids.has(e.source) && ids.has(e.target));
+
+    const degree = new Map<number, number>();
+    for (const e of visibleEdges) {
+      degree.set(e.source, (degree.get(e.source) ?? 0) + 1);
+      degree.set(e.target, (degree.get(e.target) ?? 0) + 1);
+    }
+
+    const graphNodes: GraphNodeInput[] = visibleNodes.map((n) => ({
+      id: String(n.id),
+      label: n.name,
+      type: n.type,
+      degree: degree.get(n.id) ?? 0,
+    }));
+    const graphEdges: GraphEdgeInput[] = visibleEdges.map((e) => ({
+      id: String(e.id),
+      source: String(e.source),
+      target: String(e.target),
+      predicate: e.predicate,
+    }));
+
+    return { visibleEdges, graphNodes, graphEdges };
+  }, [nodes, edges, hiddenTypes]);
+
+  const nodeById = useMemo(
+    () => new Map(nodes.map((n) => [String(n.id), n])),
+    [nodes]
   );
 
-  const selections = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return [];
-    return graph.nodes.filter((n) => (n.label ?? "").toLowerCase().includes(q)).map((n) => n.id);
-  }, [graph.nodes, search]);
+  const relationsById = useMemo(() => {
+    const map = new Map<string, Relation[]>();
+    for (const e of visible.visibleEdges) {
+      const source = String(e.source);
+      const target = String(e.target);
+      const sourceNode = nodeById.get(source);
+      const targetNode = nodeById.get(target);
+      if (!sourceNode || !targetNode) continue;
 
-  const graphRef = useRef<GraphCanvasRef | null>(null);
+      if (!map.has(source)) map.set(source, []);
+      if (!map.has(target)) map.set(target, []);
+      map.get(source)!.push({
+        id: `${e.id}-out`,
+        predicate: e.predicate,
+        otherId: target,
+        otherName: targetNode.name,
+        otherType: targetNode.type,
+        outgoing: true,
+        fact: e.fact,
+        episode: e.episode_name,
+      });
+      map.get(target)!.push({
+        id: `${e.id}-in`,
+        predicate: e.predicate,
+        otherId: source,
+        otherName: sourceNode.name,
+        otherType: sourceNode.type,
+        outgoing: false,
+        fact: e.fact,
+        episode: e.episode_name,
+      });
+    }
+    return map;
+  }, [visible.visibleEdges, nodeById]);
 
-  useEffect(() => {
-    if (graph.nodes.length === 0) return;
-    const id = requestAnimationFrame(() => graphRef.current?.fitNodesInView());
-    return () => cancelAnimationFrame(id);
-  }, [graph.nodes, graph.edges, selected]);
+  const ranked = useMemo(
+    () =>
+      [...visible.graphNodes].sort(
+        (a, b) => b.degree - a.degree || a.label.localeCompare(b.label)
+      ),
+    [visible.graphNodes]
+  );
+
+  const query = search.trim().toLowerCase();
+
+  const matchedIds = useMemo(() => {
+    if (!query) return null;
+    const set = new Set<string>();
+    for (const n of visible.graphNodes) {
+      if (n.label.toLowerCase().includes(query)) set.add(n.id);
+    }
+    return set;
+  }, [visible.graphNodes, query]);
+
+  const railNodes = useMemo(
+    () => (matchedIds ? ranked.filter((n) => matchedIds.has(n.id)) : ranked),
+    [ranked, matchedIds]
+  );
+
+  const selectedNode = selectedId ? nodeById.get(selectedId) ?? null : null;
+  const selectedRelations = selectedId ? relationsById.get(selectedId) ?? [] : [];
+
+  const handleSelect = useCallback((id: string | null) => setSelectedId(id), []);
+
+  function selectFromRail(id: string) {
+    setSelectedId(id);
+    graphHandle.current?.focusNode(id);
+  }
 
   function toggleType(type: string) {
     setHiddenTypes((prev) => {
@@ -252,126 +240,390 @@ export default function MemoryGraphPage() {
     });
   }
 
+  useEffect(() => {
+    if (!selectedId) return;
+    railListRef.current
+      ?.querySelector(`[data-entity-id="${selectedId}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [selectedId]);
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setSelectedId(null);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  const hasHidden = hiddenTypes.size > 0;
+
   return (
     <Page
       title="Memory graph"
-      description="Entities and relationships across your memory"
+      description={
+        loading
+          ? `Loading "${workspace}"…`
+          : `${visible.graphNodes.length} entities · ${visible.graphEdges.length} relations in "${workspace}"`
+      }
       icon={Share2}
       fill
+      bleed
       actions={
-        <Input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search entities…"
-          className="h-8 w-40 text-xs sm:w-56"
-        />
+        <Button
+          variant="ghost"
+          size="sm"
+          className="gap-1.5 text-muted-foreground"
+          aria-pressed={railOpen}
+          onClick={() => setRailOpen((v) => !v)}
+        >
+          <PanelLeft className={cn("transition-transform", !railOpen && "rotate-180")} />
+          <span className="hidden sm:inline">Index</span>
+        </Button>
       }
     >
-      {!labelsSupported && (
-        <p
-          className="mb-3 shrink-0 text-xs text-muted-foreground"
-          title="A WebGL feature the node labels need isn't available on this GPU — click a node to see its name instead."
-        >
-          Node labels are unavailable on this GPU — click a node to see its name.
-        </p>
-      )}
-
-      <div className="flex items-center flex-wrap gap-1.5 mb-4 text-xs shrink-0">
-        <span className="text-muted-foreground uppercase tracking-wide mr-0.5">Entities</span>
-        {presentTypes.map((type) => {
-          const active = !hiddenTypes.has(type);
-          return (
-            <button
-              key={type}
-              onClick={() => toggleType(type)}
-              className={`flex items-center gap-1 rounded-full border px-2 py-0.5 transition-opacity ${
-                active ? "opacity-100" : "opacity-40"
-              }`}
-              title={active ? `Hide ${type}` : `Show ${type}`}
+      <div className="relative flex min-h-0 flex-1">
+        {/* ── Index rail ─────────────────────────────────────────────────── */}
+        <AnimatePresence initial={false}>
+          {railOpen && (
+            <motion.aside
+              key="rail"
+              initial={{ opacity: 0, x: -12 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -12 }}
+              transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
+              className="absolute inset-y-0 left-0 z-20 flex w-72 shrink-0 flex-col border-r bg-background lg:relative lg:z-auto"
             >
-              <span className="size-2.5 rounded-full" style={{ backgroundColor: ENTITY_TYPE_COLORS[type] }} />
-              {type}
-            </button>
-          );
-        })}
-      </div>
+              <div className="space-y-3 border-b p-3">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Find an entity…"
+                    className="h-8 pl-8 font-mono text-xs"
+                  />
+                  {search && (
+                    <button
+                      onClick={() => setSearch("")}
+                      aria-label="Clear search"
+                      className="absolute top-1/2 right-1.5 flex size-5 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  )}
+                </div>
 
-      <div className="flex gap-4 flex-1 min-h-0">
-        <Card surface="chrome" className="flex-1 overflow-hidden py-0">
-          <CardContent className="p-0 relative h-full">
-            {graph.nodes.length === 0 ? (
-              <p className="text-muted-foreground text-sm p-6">
-                No graph data in &quot;{workspace}&quot; yet — save a memory with named entities to see connections here.
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <span className="font-mono text-[10px] tracking-[0.08em] text-muted-foreground uppercase">
+                      Types
+                    </span>
+                    {hasHidden && (
+                      <button
+                        onClick={() => setHiddenTypes(new Set())}
+                        className="font-mono text-[10px] tracking-wide text-primary uppercase hover:underline"
+                      >
+                        Show all
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {loading
+                      ? Array.from({ length: 7 }).map((_, i) => (
+                          <Skeleton key={i} className="h-5 w-16 rounded-4xl" />
+                        ))
+                      : presentTypes.map((type) => {
+                          const active = !hiddenTypes.has(type);
+                          return (
+                            <button
+                              key={type}
+                              onClick={() => toggleType(type)}
+                              aria-pressed={active}
+                              title={`${ENTITY_TYPE_DESCRIPTIONS[type]} — click to ${
+                                active ? "hide" : "show"
+                              }`}
+                              className={cn(
+                                "flex h-5 items-center gap-1.5 rounded-4xl border px-1.5 font-mono text-[10px] transition-colors",
+                                active
+                                  ? "border-border text-foreground hover:bg-muted"
+                                  : "border-dashed border-border/60 text-muted-foreground/60"
+                              )}
+                            >
+                              <span
+                                className="size-2 shrink-0 rounded-full transition-opacity"
+                                style={{
+                                  backgroundColor: entityColor(type, resolvedTheme),
+                                  opacity: active ? 1 : 0.35,
+                                }}
+                              />
+                              {type}
+                              <span className="tabular-nums opacity-60">{typeCounts.get(type)}</span>
+                            </button>
+                          );
+                        })}
+                  </div>
+                </div>
+              </div>
+
+              <div ref={railListRef} className="min-h-0 flex-1 overflow-y-auto">
+                <div className="sticky top-0 z-10 flex items-center justify-between border-b bg-background/95 px-3 py-1.5 backdrop-blur-sm">
+                  <span className="font-mono text-[10px] tracking-[0.08em] text-muted-foreground uppercase">
+                    Entities
+                  </span>
+                  <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
+                    by links
+                  </span>
+                </div>
+
+                {loading ? (
+                  <div className="p-3">
+                    {Array.from({ length: 12 }).map((_, i) => (
+                      <div key={i} className="flex items-center gap-2 py-2">
+                        <Skeleton className="size-2 shrink-0 rounded-full" />
+                        <Skeleton className="h-3 flex-1" style={{ maxWidth: `${40 + ((i * 19) % 45)}%` }} />
+                      </div>
+                    ))}
+                  </div>
+                ) : railNodes.length === 0 ? (
+                  <p className="px-3 py-6 text-center text-xs text-muted-foreground">
+                    {query
+                      ? `No entity matches “${search}”.`
+                      : "Every type is hidden — re-enable one above."}
+                  </p>
+                ) : (
+                  railNodes.map((n) => {
+                    const active = n.id === selectedId;
+                    return (
+                      <button
+                        key={n.id}
+                        data-entity-id={n.id}
+                        onClick={() => selectFromRail(n.id)}
+                        className={cn(
+                          "relative flex w-full items-center gap-2 border-b border-border/50 py-2 pr-3 pl-3 text-left transition-colors last:border-b-0",
+                          active ? "bg-accent" : "hover:bg-accent/50"
+                        )}
+                      >
+                        {active && <span className="absolute inset-y-0 left-0 w-0.5 bg-primary" />}
+                        <span
+                          className="size-2 shrink-0 rounded-full"
+                          style={{ backgroundColor: entityColor(n.type, resolvedTheme) }}
+                        />
+                        <span className="min-w-0 flex-1 truncate font-mono text-xs">{n.label}</span>
+                        <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
+                          {n.degree}
+                        </span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </motion.aside>
+          )}
+        </AnimatePresence>
+
+        {railOpen && (
+          <button
+            aria-label="Close index"
+            onClick={() => setRailOpen(false)}
+            className="absolute inset-0 z-10 bg-background/60 lg:hidden"
+          />
+        )}
+
+        {/* ── Canvas ─────────────────────────────────────────────────────── */}
+        <div className="relative min-w-0 flex-1 bg-card">
+          {error ? (
+            <ErrorState
+              title="Couldn't load the graph"
+              description={error}
+              className="h-full"
+              action={
+                <Button size="sm" variant="outline" onClick={() => setLoadedWorkspace(null)}>
+                  Try again
+                </Button>
+              }
+            />
+          ) : loading ? (
+            <div className="flex h-full items-center justify-center">
+              <p className="font-mono text-xs tracking-[0.08em] text-muted-foreground uppercase">
+                Plotting cross-references…
               </p>
-            ) : (
-              <>
-                <ErrorBoundary fallback={<GraphUnsupportedFallback />}>
-                  <Suspense fallback={null}>
-                    <GraphCanvas
-                      ref={graphRef}
-                      nodes={graph.nodes}
-                      edges={graph.edges}
-                      selections={selections}
-                      theme={reagraphTheme}
-                      layoutType="forceDirected2d"
-                      labelType={labelsSupported ? "all" : "none"}
-                      edgeArrowPosition="end"
-                      draggable
-                      onNodeClick={(n) => setSelected({ label: n.label ?? n.id, data: n.data as NodeData })}
-                      onCanvasClick={() => setSelected(null)}
-                    />
-                  </Suspense>
-                </ErrorBoundary>
-                <div className="absolute bottom-3 right-3 flex flex-col gap-1.5">
-                  <button className={CONTROL_BUTTON_CLASS} title="Zoom in" onClick={() => graphRef.current?.zoomIn()}>
-                    <ZoomIn className="size-4" />
+            </div>
+          ) : nodes.length === 0 ? (
+            <EmptyState
+              icon={Share2}
+              title="No cross-references filed yet"
+              description={`Nothing in "${workspace}" has been decomposed into entities. Save a memory that names people, machines, or projects and its relationships get plotted here.`}
+              className="h-full"
+            />
+          ) : visible.graphNodes.length === 0 ? (
+            <EmptyState
+              icon={ArrowLeftRight}
+              title="Every entity type is hidden"
+              description="Re-enable a type in the index to plot it again."
+              className="h-full"
+              action={
+                <Button size="sm" variant="outline" onClick={() => setHiddenTypes(new Set())}>
+                  Show all types
+                </Button>
+              }
+            />
+          ) : (
+            <ErrorBoundary
+              fallback={
+                <ErrorState
+                  title="The graph view stopped responding"
+                  description="Reload the page to plot it again."
+                  className="h-full"
+                />
+              }
+            >
+              <ForceGraph
+                nodes={visible.graphNodes}
+                edges={visible.graphEdges}
+                theme={resolvedTheme}
+                selectedId={selectedId}
+                matchedIds={matchedIds}
+                onSelect={handleSelect}
+                handleRef={graphHandle}
+              />
+
+              <p className="pointer-events-none absolute bottom-3 left-4 hidden font-mono text-[10px] tracking-wide text-muted-foreground/70 sm:block">
+                Scroll to zoom · drag the sheet to pan · drag a node to pin it
+              </p>
+
+              <div className="absolute right-3 bottom-3 flex flex-col overflow-hidden rounded-md border bg-background/90 backdrop-blur-sm">
+                {(
+                  [
+                    ["Zoom in", ZoomIn, () => graphHandle.current?.zoomBy(1.4)],
+                    ["Zoom out", ZoomOut, () => graphHandle.current?.zoomBy(1 / 1.4)],
+                    ["Fit to view", Maximize2, () => graphHandle.current?.fit()],
+                    ["Re-run layout, releasing pinned nodes", RotateCcw, () => graphHandle.current?.relayout()],
+                  ] as const
+                ).map(([label, Icon, onClick]) => (
+                  <button
+                    key={label}
+                    title={label}
+                    aria-label={label}
+                    onClick={onClick}
+                    className="flex size-8 items-center justify-center text-muted-foreground transition-colors not-last:border-b hover:bg-accent hover:text-foreground"
+                  >
+                    <Icon className="size-3.5" />
                   </button>
-                  <button className={CONTROL_BUTTON_CLASS} title="Zoom out" onClick={() => graphRef.current?.zoomOut()}>
-                    <ZoomOut className="size-4" />
+                ))}
+              </div>
+            </ErrorBoundary>
+          )}
+        </div>
+
+        {/* ── Inspector ──────────────────────────────────────────────────── */}
+        <AnimatePresence initial={false}>
+          {selectedNode && (
+            <motion.aside
+              key="inspector"
+              initial={{ opacity: 0, x: 16 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 16 }}
+              transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+              className="absolute inset-y-0 right-0 z-20 flex w-[min(22rem,88vw)] shrink-0 flex-col border-l bg-background xl:relative xl:z-auto"
+            >
+              <div className="flex items-start gap-2 border-b p-4">
+                <span
+                  className="mt-1.5 size-2.5 shrink-0 rounded-full"
+                  style={{ backgroundColor: entityColor(selectedNode.type, resolvedTheme) }}
+                />
+                <div className="min-w-0 flex-1">
+                  <h2 className="font-heading text-base leading-snug font-semibold break-words">
+                    {selectedNode.name}
+                  </h2>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                    <Badge variant="secondary" className="font-mono text-[10px]">
+                      {selectedNode.type}
+                    </Badge>
+                    <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
+                      {selectedRelations.length} relation
+                      {selectedRelations.length === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-0.5">
+                  <button
+                    title="Centre on this entity"
+                    aria-label="Centre on this entity"
+                    onClick={() => graphHandle.current?.focusNode(selectedNode.id.toString())}
+                    className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  >
+                    <Locate className="size-3.5" />
                   </button>
-                  <button className={CONTROL_BUTTON_CLASS} title="Fit to view" onClick={() => graphRef.current?.fitNodesInView()}>
-                    <Maximize className="size-4" />
-                  </button>
-                  <button className={CONTROL_BUTTON_CLASS} title="Reset view" onClick={() => graphRef.current?.resetControls()}>
-                    <RotateCcw className="size-4" />
+                  <button
+                    title="Close"
+                    aria-label="Close inspector"
+                    onClick={() => setSelectedId(null)}
+                    className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  >
+                    <X className="size-3.5" />
                   </button>
                 </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
+              </div>
 
-        <AnimatePresence>
-          {selected && (
-            <motion.div
-              initial={{ opacity: 0, x: 8 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 8 }}
-              transition={{ duration: 0.15, ease: "easeOut" }}
-              className="w-80 shrink-0"
-            >
-              <Card surface="chrome" className="overflow-y-auto h-full">
-                <CardContent className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-medium text-sm">{selected.label}</h3>
-                    <Badge variant="secondary">{selected.data.type}</Badge>
-                  </div>
-                  {selected.data.summary && (
-                    <p className="text-sm text-muted-foreground">{selected.data.summary}</p>
-                  )}
-                  <ul className="space-y-2">
-                    {selected.data.connections.map((c, i) => (
-                      <li key={i} className="text-sm">
-                        <span className="font-medium">
-                          {c.outgoing ? `${c.predicate} → ${c.other}` : `${c.other} ${c.predicate} →`}
-                        </span>
-                        <p className="text-xs text-muted-foreground">{c.fact}</p>
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                {selectedNode.summary && (
+                  <p className="border-b px-4 py-3 text-sm leading-relaxed text-muted-foreground">
+                    {selectedNode.summary}
+                  </p>
+                )}
+
+                <div className="sticky top-0 z-10 border-b bg-background/95 px-4 py-1.5 font-mono text-[10px] tracking-[0.08em] text-muted-foreground uppercase backdrop-blur-sm">
+                  Cross-references
+                </div>
+
+                {selectedRelations.length === 0 ? (
+                  <p className="px-4 py-6 text-xs text-muted-foreground">
+                    Nothing links to this entity in the current view — a hidden type may be holding
+                    its only relation.
+                  </p>
+                ) : (
+                  <ul>
+                    {selectedRelations.map((r) => (
+                      <li key={r.id} className="border-b border-border/50 px-4 py-3 last:border-b-0">
+                        <div className="flex items-center gap-1.5">
+                          <ArrowRight
+                            className={cn(
+                              "size-3 shrink-0 text-muted-foreground",
+                              !r.outgoing && "rotate-180"
+                            )}
+                          />
+                          <span className="font-mono text-[10px] tracking-[0.06em] text-primary uppercase">
+                            {readablePredicate(r.predicate)}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => selectFromRail(r.otherId)}
+                          className="mt-1 flex w-full items-center gap-1.5 text-left"
+                        >
+                          <span
+                            className="size-2 shrink-0 rounded-full"
+                            style={{ backgroundColor: entityColor(r.otherType, resolvedTheme) }}
+                          />
+                          <span className="min-w-0 truncate font-mono text-xs underline-offset-4 hover:underline">
+                            {r.otherName}
+                          </span>
+                        </button>
+                        {r.fact && (
+                          <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                            {r.fact}
+                          </p>
+                        )}
+                        {r.episode && (
+                          <p className="mt-1.5 font-mono text-[10px] text-muted-foreground/70">
+                            filed under {r.episode}
+                          </p>
+                        )}
                       </li>
                     ))}
                   </ul>
-                </CardContent>
-              </Card>
-            </motion.div>
+                )}
+              </div>
+            </motion.aside>
           )}
         </AnimatePresence>
       </div>
