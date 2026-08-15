@@ -11,6 +11,7 @@ proceeds with no injected context.
 import json
 import os
 import sys
+import time
 import urllib.request
 from pathlib import Path
 
@@ -18,12 +19,44 @@ STATE_DIR = Path.home() / ".continuum"
 TOKEN_FILE = STATE_DIR / "hook-token"
 DISABLE_FILE = STATE_DIR / "hook-disabled"
 WORKSPACE_MAP = STATE_DIR / "workspace-map.json"
+UPDATE_STAMP = STATE_DIR / "update-checked-at"
+UPDATE_DISABLE_FILE = STATE_DIR / "no-auto-update"
+UPDATER = Path.home() / ".claude" / "hooks" / "continuum-self-update.py"
 
 CONTINUUM_URL = os.environ.get("CONTINUUM_MCP_URL", "https://continuum-mcp.sshogunn.org")
 TIMEOUT_SECONDS = 3.0
 RECENT_TURNS = 6
 RECENT_TURN_CHARS = 600
 RECENT_TOTAL_CHARS = 2000
+
+
+def spawn_update():
+    if UPDATE_DISABLE_FILE.exists() or not UPDATER.is_file():
+        return
+    try:
+        hours = float(os.environ.get("CONTINUUM_UPDATE_INTERVAL_HOURS", "24"))
+    except ValueError:
+        hours = 24.0
+    try:
+        if time.time() - UPDATE_STAMP.stat().st_mtime < hours * 3600:
+            return
+    except OSError:
+        pass
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    UPDATE_STAMP.write_text(str(int(time.time())), encoding="utf-8")
+
+    import subprocess
+
+    kwargs = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
+    if os.name == "nt":
+        kwargs["creationflags"] = 0x00000008 | 0x08000000
+    else:
+        kwargs["start_new_session"] = True
+    subprocess.Popen([sys.executable, str(UPDATER)], **kwargs)
 
 
 def text_of(message):
@@ -129,6 +162,10 @@ if __name__ == "__main__":
             pass
     try:
         main()
+    except Exception:
+        pass
+    try:
+        spawn_update()
     except Exception:
         pass
     sys.exit(0)

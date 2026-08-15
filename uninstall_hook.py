@@ -20,7 +20,7 @@ STATE_DIR = HOME / ".continuum"
 HOOKS_DIR = HOME / ".claude" / "hooks"
 SETTINGS_PATH = HOME / ".claude" / "settings.json"
 
-STEMS = ("continuum-context-inject", "continuum-session-capture")
+STEMS = ("continuum-context-inject", "continuum-session-capture", "continuum-self-update")
 EVENTS = ("UserPromptSubmit", "SessionEnd")
 
 

@@ -39,6 +39,7 @@ HOOKS = [
     ("UserPromptSubmit", "continuum-context-inject", "continuum_context_inject.py", 5),
     ("SessionEnd", "continuum-session-capture", "continuum_session_capture.py", 15),
 ]
+UPDATER = ("continuum-self-update", "continuum_self_update.py")
 
 
 def interpreter():
@@ -120,6 +121,7 @@ def main():
 
     token = read_token()
     sources = {name: download(name) for _, _, name, _ in HOOKS}
+    sources[UPDATER[1]] = download(UPDATER[1])
 
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     HOOKS_DIR.mkdir(parents=True, exist_ok=True)
@@ -142,6 +144,11 @@ def main():
         if legacy.exists():
             legacy.unlink()
 
+    updater_path = HOOKS_DIR / (UPDATER[0] + ".py")
+    updater_path.write_bytes(sources[UPDATER[1]])
+    if os.name == "posix":
+        updater_path.chmod(updater_path.stat().st_mode | stat.S_IXUSR)
+
     SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
         json.dump(settings, f, indent=2)
@@ -156,7 +163,12 @@ def main():
     for event, result in results:
         print("  %-16s -> %s [%s]" % (event, labels[event], result))
     print("")
+    print("The hooks keep themselves current: once a day the context hook spawns")
+    print("%s in the background, which replaces any hook" % updater_path)
+    print("whose SHA-256 no longer matches the published copy.")
+    print("")
     print("Disable session capture only:  create the file %s" % (STATE_DIR / "capture-disabled"))
+    print("Disable auto-update:           create the file %s" % (STATE_DIR / "no-auto-update"))
     print("Run /hooks in Claude Code (or restart it) to pick up the change.")
 
 

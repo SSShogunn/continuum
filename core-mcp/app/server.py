@@ -48,6 +48,7 @@ PUBLIC_SCRIPTS = (
     "uninstall_hook.py",
     "continuum_context_inject.py",
     "continuum_session_capture.py",
+    "continuum_self_update.py",
 )
 
 DEFAULT_USER_AGENT = (
@@ -243,7 +244,7 @@ def _script_route(name: str):
     flow depends on what this container happens to have on disk. `install-hook.sh`
     and `install-hook.ps1` are thin per-platform bootstraps that find a Python
     and hand off to `install_hook.py`, which is the real installer everywhere;
-    `install_hook.py` in turn pulls the `continuum_*`
+    `install_hook.py` and the background updater in turn pull the `continuum_*`
     hook scripts through these same URLs. Only the token (from the dashboard's
     Connections page) is secret, and it never travels through here."""
 
