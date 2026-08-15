@@ -53,7 +53,7 @@ export function AuthShell({
 
           <span
             aria-hidden
-            className="absolute right-5 top-5 flex size-14 -rotate-[9deg] items-center justify-center rounded-full border-[1.5px] border-primary text-center font-mono text-[0.55rem] leading-tight font-bold tracking-wider text-primary opacity-80 mix-blend-multiply"
+            className="absolute right-5 top-5 flex size-14 -rotate-[9deg] items-center justify-center rounded-full border-[1.5px] border-primary text-center font-mono text-[0.55rem] leading-tight font-bold tracking-wider text-primary opacity-80 mix-blend-multiply dark:opacity-100 dark:mix-blend-normal"
           >
             {stamp}
           </span>

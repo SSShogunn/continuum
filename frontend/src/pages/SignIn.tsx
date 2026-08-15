@@ -9,7 +9,7 @@ import { Separator } from "@/components/ui/separator";
 import { GoogleIcon } from "@/components/auth/google-icon";
 import { GitHubIcon } from "@/components/auth/github-icon";
 
-type Step = "identifier" | "password" | "code";
+type Step = "identifier" | "password" | "code" | "reset-code" | "reset-password";
 
 type AuthError = { message?: string; longMessage?: string } | null;
 
@@ -24,7 +24,10 @@ export default function SignInPage() {
   const [step, setStep] = React.useState<Step>("identifier");
   const [identifier, setIdentifier] = React.useState("");
   const [password, setPassword] = React.useState("");
+  const [newPassword, setNewPassword] = React.useState("");
+  const [confirmPassword, setConfirmPassword] = React.useState("");
   const [code, setCode] = React.useState("");
+  const [canReset, setCanReset] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [notice, setNotice] = React.useState<string | null>(null);
 
@@ -50,6 +53,7 @@ export default function SignInPage() {
       if (await completeIfNeeded()) return;
 
       const factors = signIn.supportedFirstFactors ?? [];
+      setCanReset(factors.some((f) => f.strategy === "reset_password_email_code"));
 
       if (factors.some((f) => f.strategy === "password")) {
         setStep("password");
@@ -81,6 +85,68 @@ export default function SignInPage() {
     setNotice(null);
     try {
       const { error } = await signIn.password({ password });
+      if (error) {
+        setNotice(errorMessage(error));
+        return;
+      }
+      if (!(await completeIfNeeded())) setNotice(UNSUPPORTED_STEP);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleForgotPassword() {
+    setBusy(true);
+    setNotice(null);
+    try {
+      const { error } = await signIn.resetPasswordEmailCode.sendCode();
+      if (error) {
+        setNotice(errorMessage(error));
+        return;
+      }
+      setPassword("");
+      setCode("");
+      setStep("reset-code");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleResetCodeSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setNotice(null);
+    try {
+      const { error } = await signIn.resetPasswordEmailCode.verifyCode({ code });
+      if (error) {
+        setNotice(errorMessage(error));
+        return;
+      }
+      if (await completeIfNeeded()) return;
+      if (signIn.status !== "needs_new_password") {
+        setNotice(UNSUPPORTED_STEP);
+        return;
+      }
+      setCode("");
+      setStep("reset-password");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleNewPasswordSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (newPassword !== confirmPassword) {
+      setNotice("Passwords don't match");
+      return;
+    }
+    setBusy(true);
+    setNotice(null);
+    try {
+      const { error } = await signIn.resetPasswordEmailCode.submitPassword({
+        password: newPassword,
+        signOutOfOtherSessions: true,
+      });
       if (error) {
         setNotice(errorMessage(error));
         return;
@@ -192,15 +258,28 @@ export default function SignInPage() {
         {step === "password" && (
           <form onSubmit={handlePasswordSubmit} className="flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
-              <Label
-                htmlFor="password"
-                className="font-mono text-[0.68rem] tracking-[0.06em] text-muted-foreground uppercase"
-              >
-                Password
-              </Label>
+              <div className="flex items-baseline justify-between gap-2">
+                <Label
+                  htmlFor="password"
+                  className="font-mono text-[0.68rem] tracking-[0.06em] text-muted-foreground uppercase"
+                >
+                  Password
+                </Label>
+                {canReset && (
+                  <button
+                    type="button"
+                    onClick={handleForgotPassword}
+                    disabled={busy}
+                    className="font-mono text-xs text-muted-foreground transition-colors hover:text-card-foreground disabled:opacity-50"
+                  >
+                    Forgot password?
+                  </button>
+                )}
+              </div>
               <Input
                 id="password"
                 type="password"
+                autoComplete="current-password"
                 required
                 autoFocus
                 value={password}
@@ -217,6 +296,97 @@ export default function SignInPage() {
             >
               ← use a different email
             </button>
+          </form>
+        )}
+
+        {step === "reset-code" && (
+          <form onSubmit={handleResetCodeSubmit} className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1.5">
+              <Label
+                htmlFor="reset-code"
+                className="font-mono text-[0.68rem] tracking-[0.06em] text-muted-foreground uppercase"
+              >
+                Reset code
+              </Label>
+              <p className="font-mono text-xs text-muted-foreground">
+                We sent a password reset code to {identifier}
+              </p>
+              <Input
+                id="reset-code"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                required
+                autoFocus
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+              />
+            </div>
+            <Button type="submit" disabled={busy || !code} className="w-full">
+              Continue
+            </Button>
+            <button
+              type="button"
+              onClick={handleForgotPassword}
+              disabled={busy}
+              className="font-mono text-xs text-muted-foreground transition-colors hover:text-card-foreground disabled:opacity-50"
+            >
+              resend code
+            </button>
+            <button
+              type="button"
+              onClick={() => setStep("password")}
+              className="font-mono text-xs text-muted-foreground transition-colors hover:text-card-foreground"
+            >
+              ← back to password
+            </button>
+          </form>
+        )}
+
+        {step === "reset-password" && (
+          <form onSubmit={handleNewPasswordSubmit} className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1.5">
+              <Label
+                htmlFor="new-password"
+                className="font-mono text-[0.68rem] tracking-[0.06em] text-muted-foreground uppercase"
+              >
+                New password
+              </Label>
+              <Input
+                id="new-password"
+                type="password"
+                autoComplete="new-password"
+                required
+                autoFocus
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label
+                htmlFor="confirm-password"
+                className="font-mono text-[0.68rem] tracking-[0.06em] text-muted-foreground uppercase"
+              >
+                Confirm password
+              </Label>
+              <Input
+                id="confirm-password"
+                type="password"
+                autoComplete="new-password"
+                required
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+              />
+            </div>
+            <Button
+              type="submit"
+              disabled={busy || !newPassword || !confirmPassword}
+              className="w-full"
+            >
+              Reset password
+            </Button>
+            <p className="font-mono text-xs text-muted-foreground">
+              This signs you out of any other active sessions.
+            </p>
           </form>
         )}
 
