@@ -1,9 +1,9 @@
 [project]
 name = "continuum-core"
 version = "0.1.0"
-description = "MCP server for browser-grade web access — fetch pages as markdown, screenshot, and download images via headless Playwright"
+description = "MCP server for persistent, personal agent memory — atomic fact extraction, vector recall over pgvector, and auto-injected context"
 requires-python = ">=3.13,<3.14"
-keywords = ["mcp", "playwright", "browser", "web-scraping", "screenshot", "fastmcp", "llm-tools"]
+keywords = ["mcp", "model-context-protocol", "fastmcp", "ai-memory", "pgvector", "embeddings", "rag", "llm"]
 
 dependencies = [
     "alembic>=1.13.0",

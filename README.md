@@ -8,7 +8,7 @@ connect securely and keep the same memory across sessions.
 |---|---|---|
 | `core-mcp` | FastMCP, Playwright, Postgres + pgvector, Alembic | continuum-mcp.sshogunn.org |
 | `backend` | FastAPI, SQLAlchemy 2.0 + Alembic, Clerk, OAuth 2.0 PKCE | continuum-api.sshogunn.org |
-| `frontend` | Next.js, Clerk, dashboard + consent page | continuum.sshogunn.org |
+| `frontend` | Vite, React 19, Clerk, dashboard + consent page | continuum.sshogunn.org |
 
 OAuth 2.0 (register → authorize → consent → token exchange) is verified working with Claude.ai.
 
