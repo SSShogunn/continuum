@@ -34,8 +34,19 @@ load_dotenv()
 
 
 ICON_PATH = Path(__file__).parent / "icons" / "logo.svg"
-INSTALL_HOOK_SCRIPT_PATH = Path(__file__).parent / "scripts" / "install-hook.sh"
-UNINSTALL_HOOK_SCRIPT_PATH = Path(__file__).parent / "scripts" / "uninstall-hook.sh"
+
+SCRIPT_RAW_BASE = os.environ.get(
+    "CONTINUUM_SCRIPT_RAW_BASE",
+    "https://raw.githubusercontent.com/SSShogunn/continuum/main",
+).rstrip("/")
+PUBLIC_SCRIPTS = (
+    "install-hook.sh",
+    "uninstall-hook.sh",
+    "install_hook.py",
+    "uninstall_hook.py",
+    "continuum_context_inject.py",
+    "continuum_session_capture.py",
+)
 
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -224,28 +235,24 @@ async def serve_app_icon(request: Request) -> Response:
     return Response(ICON_PATH.read_bytes(), media_type="image/svg+xml")
 
 
-@mcp.custom_route("/install-hook.sh", methods=["GET"])
-async def serve_install_hook(request: Request) -> Response:
-    """Public — the script only sets up the local hook; it needs a token
-    (from the dashboard) to actually authenticate once run. See
-    `README.md` / the dashboard's Settings > API Tokens tab for the
-    `curl | bash` command this is meant to be piped into."""
-    return Response(
-        INSTALL_HOOK_SCRIPT_PATH.read_bytes(),
-        media_type="text/x-shellscript",
-        headers={"Content-Disposition": "inline; filename=install-hook.sh"},
-    )
+def _script_route(name: str):
+    """Public, and a redirect rather than a file read: the scripts live at the
+    repo root and are served straight off GitHub, so nothing about the install
+    flow depends on what this container happens to have on disk. `install-hook.sh`
+    is a thin bootstrap that finds a Python and hands off to `install_hook.py`,
+    which is the real installer; `install_hook.py` in turn pulls the `continuum_*`
+    hook scripts through these same URLs. Only the token (from the dashboard's
+    Connections page) is secret, and it never travels through here."""
+
+    async def serve_script(request: Request) -> Response:
+        return RedirectResponse(f"{SCRIPT_RAW_BASE}/{name}", status_code=302)
+
+    serve_script.__name__ = f"serve_{name.replace('-', '_').replace('.', '_')}"
+    return serve_script
 
 
-@mcp.custom_route("/uninstall-hook.sh", methods=["GET"])
-async def serve_uninstall_hook(request: Request) -> Response:
-    """Public — reverses install-hook.sh. Pure local cleanup, no token needed:
-    `curl -fsSL https://continuum-mcp.sshogunn.org/uninstall-hook.sh | bash`."""
-    return Response(
-        UNINSTALL_HOOK_SCRIPT_PATH.read_bytes(),
-        media_type="text/x-shellscript",
-        headers={"Content-Disposition": "inline; filename=uninstall-hook.sh"},
-    )
+for _script_name in PUBLIC_SCRIPTS:
+    mcp.custom_route(f"/{_script_name}", methods=["GET"])(_script_route(_script_name))
 
 
 def _check_internal_secret(request: Request) -> bool:
