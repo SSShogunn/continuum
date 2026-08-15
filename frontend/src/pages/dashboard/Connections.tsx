@@ -17,6 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface Connection {
   client_id: string;
@@ -28,6 +29,15 @@ interface Connection {
 
 const MCP_URL = import.meta.env.VITE_CONTINUUM_MCP_URL || "https://continuum-mcp.sshogunn.org";
 const CLAUDE_CODE_CONNECT_COMMAND = `claude mcp add --transport http continuum ${MCP_URL}/mcp`;
+
+type InstallPlatform = "unix" | "windows";
+
+function detectPlatform(): InstallPlatform {
+  const hint =
+    (navigator as { userAgentData?: { platform?: string } }).userAgentData?.platform ??
+    navigator.userAgent;
+  return /win/i.test(hint) ? "windows" : "unix";
+}
 
 function GettingStarted() {
   const [copied, setCopied] = useState(false);
@@ -99,6 +109,7 @@ export default function ConnectionsPage() {
   const [minting, setMinting] = useState(false);
   const [mintError, setMintError] = useState<string | null>(null);
   const [installOpen, setInstallOpen] = useState(false);
+  const [installPlatform, setInstallPlatform] = useState<InstallPlatform>(detectPlatform);
   const [installCopied, setInstallCopied] = useState(false);
 
   useEffect(() => {
@@ -168,16 +179,15 @@ export default function ConnectionsPage() {
     }
   }
 
-  const installCommand = newToken
-    ? `curl -fsSL ${MCP_URL}/install-hook.sh | CONTINUUM_TOKEN=${newToken} bash`
-    : "";
-  const installCommandDisplay = newToken
-    ? `curl -fsSL ${MCP_URL}/install-hook.sh | CONTINUUM_TOKEN=${maskSecret(newToken)} bash`
-    : "";
+  function installCommand(os: InstallPlatform, token: string) {
+    return os === "windows"
+      ? `$env:CONTINUUM_TOKEN="${token}"; irm ${MCP_URL}/install-hook.ps1 | iex`
+      : `curl -fsSL ${MCP_URL}/install-hook.sh | CONTINUUM_TOKEN=${token} bash`;
+  }
 
   async function copyInstallCommand() {
-    if (!installCommand) return;
-    await navigator.clipboard.writeText(installCommand);
+    if (!newToken) return;
+    await navigator.clipboard.writeText(installCommand(installPlatform, newToken));
     setInstallCopied(true);
     setTimeout(() => setInstallCopied(false), 2000);
   }
@@ -291,18 +301,36 @@ export default function ConnectionsPage() {
             </DialogDescription>
           </DialogHeader>
           {newToken ? (
-            <div className="space-y-3">
-              <code className="block text-xs break-all rounded border border-border bg-muted/40 p-3 font-mono">
-                {installCommandDisplay}
-              </code>
-              <Button onClick={copyInstallCommand} variant="outline" size="sm">
-                {installCopied ? "Copied!" : "Copy command"}
-              </Button>
+            <Tabs
+              value={installPlatform}
+              onValueChange={(value) => {
+                setInstallPlatform(value as InstallPlatform);
+                setInstallCopied(false);
+              }}
+              className="space-y-3"
+            >
+              <TabsList>
+                <TabsTrigger value="unix">macOS / Linux</TabsTrigger>
+                <TabsTrigger value="windows">Windows</TabsTrigger>
+              </TabsList>
+              {(["unix", "windows"] as const).map((os) => (
+                <TabsContent key={os} value={os} className="space-y-3">
+                  <code className="block text-xs break-all rounded border border-border bg-muted/40 p-3 font-mono">
+                    {installCommand(os, maskSecret(newToken))}
+                  </code>
+                  <Button onClick={copyInstallCommand} variant="outline" size="sm">
+                    {installCopied ? "Copied!" : "Copy command"}
+                  </Button>
+                </TabsContent>
+              ))}
               <p className="text-muted-foreground text-xs">
-                The token above is masked on screen — the copy button places the full working
-                command on your clipboard. Run it in a terminal.
+                {installPlatform === "windows"
+                  ? "Run it in PowerShell. Needs Python 3.8+ on PATH — the hooks themselves are Python, so the same ones run on every platform."
+                  : "Run it in a terminal. Needs Python 3.8+ on PATH — the hooks themselves are Python, so the same ones run on every platform."}{" "}
+                The token is masked on screen; the copy button places the full working command on
+                your clipboard.
               </p>
-            </div>
+            </Tabs>
           ) : (
             <div className="space-y-2">
               <Button onClick={mintToken} disabled={minting} variant="outline" size="sm">
