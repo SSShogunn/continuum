@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { UserProfile } from "@clerk/react";
 import { Check, Monitor, Moon, Sun, Settings as SettingsIcon } from "lucide-react";
 import { useTheme } from "@/lib/theme-context";
 import { useWorkspace } from "@/lib/workspace-context";
@@ -11,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Page } from "@/components/page";
+import { DeleteAccountCard, ProfileTab } from "@/components/account-profile";
 import {
   Dialog,
   DialogContent,
@@ -255,14 +255,7 @@ function DangerZoneTab() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardContent>
-          <p className="text-muted-foreground text-xs">
-            To delete your account entirely, use the account portal in the{" "}
-            <span className="text-foreground">Profile</span> tab.
-          </p>
-        </CardContent>
-      </Card>
+      <DeleteAccountCard />
 
       <Dialog open={confirmOpen} onOpenChange={(open) => { setConfirmOpen(open); if (!open) setConfirmText(""); }}>
         <DialogContent>
@@ -311,12 +304,7 @@ export default function SettingsPage() {
         </TabsList>
 
         <TabsContent value="profile">
-          <div className="mt-4">
-            <UserProfile
-              routing="hash"
-              appearance={{ elements: { rootBox: "w-full", cardBox: "w-full shadow-none" } }}
-            />
-          </div>
+          <ProfileTab />
         </TabsContent>
 
         <TabsContent value="preferences">

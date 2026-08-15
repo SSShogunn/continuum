@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { useUser, useClerk, UserButton } from "@clerk/react";
+import { useUser, useClerk } from "@clerk/react";
 import { motion } from "motion/react";
 import {
   Database,
@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   Settings as SettingsIcon,
   LogOut,
+  UserRound,
 } from "lucide-react";
 
 function GithubMark() {
@@ -172,12 +173,17 @@ export function DashboardSidebar() {
           </SidebarMenuItem>
         </SidebarMenu>
         <div className="flex items-center justify-between gap-2 px-2 py-1.5 group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:px-0">
-          <div className="flex items-center gap-2 min-w-0">
-            <UserButton />
-            <span className="text-sm truncate group-data-[collapsible=icon]:hidden">
-              {user?.primaryEmailAddress?.emailAddress ?? user?.fullName ?? ""}
-            </span>
-          </div>
+          <Link
+            to="/dashboard/settings"
+            title="Account settings"
+            className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full border bg-secondary/40 text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          >
+            {user?.hasImage ? (
+              <img src={user.imageUrl} alt="" className="size-full object-cover" />
+            ) : (
+              <UserRound className="size-4 text-primary" />
+            )}
+          </Link>
           <div className="flex items-center gap-1">
             <ThemeToggle />
             <button
