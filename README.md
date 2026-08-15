@@ -102,11 +102,13 @@ irrelevant messages inject nothing (`{"context": null}`), and otherwise returns 
 dropped into a host's per-message context hook — e.g. a Claude Code `UserPromptSubmit` hook.
 
 The installer for exactly that hook is idempotent, safe to re-run, and merges into
-`~/.claude/settings.json` rather than overwriting it. It lives at the repo root, flat, and
+`~/.claude/settings.json` rather than overwriting it. Everything it needs lives in `hooks/`, and
 `core-mcp` serves it by redirecting to GitHub rather than shipping it in the image, so an install
-never depends on what a container happens to have on disk:
+never depends on what a container happens to have on disk. The URLs stay flat at the root even
+though the files sit in a subdirectory — already-installed hooks fetch their own updates through
+them:
 
-| repo root | served at | role |
+| `hooks/` | served at | role |
 | --- | --- | --- |
 | `install-hook.sh` / `install-hook.ps1` | `GET /install-hook.{sh,ps1}` | per-platform bootstrap: find a Python 3.8+, download the installer, hand off |
 | `install_hook.py` | `GET /install_hook.py` | the actual installer, identical on every platform |
