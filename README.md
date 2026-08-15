@@ -22,16 +22,28 @@ themselves, just connect a client to the hosted instance:
    — opens a browser to sign in and authorize.
 3. **Claude.ai**: Settings → Connectors → Add custom connector →
    `https://continuum-mcp.sshogunn.org/mcp`.
-4. Optional — **auto-context for Claude Code**: the dashboard's Settings → API Tokens tab shows a
-   one-line `curl | bash` install command after generating a token. It wires up a
-   `UserPromptSubmit` hook that injects relevant memory into every message automatically, instead
-   of relying on Claude to decide to call `memory_search` (see "Auto-injected context" below). The
-   hook itself does no project-detection — it auto-scopes by reading back whatever workspace the
-   model already decided on for the current directory (see below), and still merges in `default`
-   so cross-project facts (identity, preferences) keep showing up everywhere. The Connections page
-   also has the copy-paste connect commands above.
-   - Already installed from an older version? Re-run the install command — it overwrites the hook
-     script in place (idempotent) and is the only way an existing install picks up this behavior.
+4. Optional — **auto-context for Claude Code**: the dashboard's Connections page shows a one-line
+   install command after generating a token, for whichever platform you're on:
+
+   ```bash
+   # macOS / Linux / WSL / Git Bash
+   curl -fsSL https://continuum-mcp.sshogunn.org/install-hook.sh | CONTINUUM_TOKEN=<token> bash
+   ```
+   ```powershell
+   # Windows PowerShell
+   $env:CONTINUUM_TOKEN="<token>"; irm https://continuum-mcp.sshogunn.org/install-hook.ps1 | iex
+   ```
+
+   It wires up a `UserPromptSubmit` hook that injects relevant memory into every message
+   automatically, instead of relying on Claude to decide to call `memory_search` (see
+   "Auto-injected context" below). The hook itself does no project-detection — it auto-scopes by
+   reading back whatever workspace the model already decided on for the current directory (see
+   below), and still merges in `default` so cross-project facts (identity, preferences) keep
+   showing up everywhere. The Connections page also has the copy-paste connect commands above.
+   - Needs Python 3.8+ on `PATH`; the installers check and say so if it's missing.
+   - Already installed from an older version? Re-run the install command — it replaces the hook
+     scripts and their `settings.json` entries in place (idempotent), including the extension-less
+     bash hooks earlier versions shipped.
 
 Both connection paths (steps 2–3) go through OAuth — no token to copy/paste. The manual token used
 in step 4 exists specifically for non-interactive automation (the hook script has no browser to
@@ -88,9 +100,35 @@ Bearer-JWT-gated (same manual/OAuth tokens the MCP transport already accepts —
 dashboard's Settings page), it embeds the query once, gates on a cheap top-1 cosine check so
 irrelevant messages inject nothing (`{"context": null}`), and otherwise returns a blob meant to be
 dropped into a host's per-message context hook — e.g. a Claude Code `UserPromptSubmit` hook.
-`GET /install-hook.sh` (`core-mcp/app/scripts/install-hook.sh`) serves a self-contained installer
-for exactly that hook — idempotent, safe to re-run, merges into `~/.claude/settings.json` rather
-than overwriting it.
+
+The installer for exactly that hook is idempotent, safe to re-run, and merges into
+`~/.claude/settings.json` rather than overwriting it. It lives at the repo root, flat, and
+`core-mcp` serves it by redirecting to GitHub rather than shipping it in the image, so an install
+never depends on what a container happens to have on disk:
+
+| repo root | served at | role |
+| --- | --- | --- |
+| `install-hook.sh` / `install-hook.ps1` | `GET /install-hook.{sh,ps1}` | per-platform bootstrap: find a Python 3.8+, download the installer, hand off |
+| `install_hook.py` | `GET /install_hook.py` | the actual installer, identical on every platform |
+| `continuum_context_inject.py` | `GET /continuum_context_inject.py` | the `UserPromptSubmit` hook |
+| `continuum_session_capture.py` | `GET /continuum_session_capture.py` | the `SessionEnd` hook |
+| `continuum_self_update.py` | `GET /continuum_self_update.py` | the background updater |
+| `uninstall-hook.sh` / `.ps1` / `uninstall_hook.py` | `GET /uninstall-hook.{sh,ps1}`, `/uninstall_hook.py` | the reverse, no token needed |
+
+Everything below the bootstrap is **stdlib Python with no shell**, which is what makes one
+implementation cover Linux, macOS and Windows: no bash, no `curl`, no shebang (`settings.json` gets
+`"<abs python> <abs hook>.py"`, resolved at install time and pinned past any active virtualenv),
+and stdio forced to UTF-8 so a legacy Windows codepage can't mangle a transcript. Every failure
+path — no token, dead network, unparseable stdin, timeout — exits 0 silently, so the hook can never
+block a prompt.
+
+The hooks keep themselves current. At most once every `CONTINUUM_UPDATE_INTERVAL_HOURS` (default
+24) the context hook spawns `continuum_self_update.py` **detached, after it has already written its
+output**, and exits without waiting — nothing about the update is ever in the path of a prompt. The
+updater SHA-256s each installed hook against the published copy and atomically replaces only what
+drifted, itself included; a payload that doesn't `compile()` as Python is discarded rather than
+written, so a 404 page or a truncated download can't brick the hook. Disable with
+`touch ~/.continuum/no-auto-update`, or run the updater by hand to force a check.
 
 What gets injected is decided by a memory's **recall tier**, a column independent of its subject
 `type`, because the two axes fail in opposite directions:
@@ -132,7 +170,9 @@ which enqueues an arq job that extracts durable facts (decisions, preferences, s
 project state) and writes them to a **review queue** — never straight to memory. The dashboard's
 Memory page shows them as proposals with Save/Discard. Nothing is auto-written, deliberately: an
 automatic writer that is wrong is worse than one that never runs, because a bad memory then
-contaminates every later retrieval. Disable it alone with `touch ~/.continuum/capture-disabled`.
+contaminates every later retrieval. Disable it alone by creating the file
+`~/.continuum/capture-disabled` (`New-Item ~\.continuum\capture-disabled` on Windows), which leaves
+context injection running.
 
 Project-scoping is deliberately kept out of the hook script — it stays a dumb lookup, not a second
 place that has to guess what project it's in. The model owns that decision: per rule 7 in
