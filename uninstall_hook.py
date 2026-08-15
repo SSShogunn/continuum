@@ -6,7 +6,8 @@ scripts, their settings.json registrations, and the local token/workspace state.
 Safe to re-run (idempotent), safe to run even if never installed, and cleans up
 installs from older bash-only versions too.
 
-  curl -fsSL https://continuum-mcp.sshogunn.org/uninstall-hook.sh | bash
+  Linux/macOS   curl -fsSL https://continuum-mcp.sshogunn.org/uninstall-hook.sh | bash
+  Windows       irm https://continuum-mcp.sshogunn.org/uninstall-hook.ps1 | iex
 """
 
 import json

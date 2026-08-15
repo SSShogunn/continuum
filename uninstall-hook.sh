@@ -2,7 +2,8 @@
 # Continuum — Claude Code auto-context uninstaller (Linux/macOS/WSL/Git Bash).
 #
 # A bootstrap only: it locates a Python 3.8+, downloads uninstall_hook.py, and
-# hands off. Pure local cleanup, no token needed.
+# hands off. Pure local cleanup, no token needed. Windows PowerShell has its own
+# bootstrap, uninstall-hook.ps1.
 #
 # Usage:
 #   curl -fsSL https://continuum-mcp.sshogunn.org/uninstall-hook.sh | bash

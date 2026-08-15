@@ -41,7 +41,9 @@ SCRIPT_RAW_BASE = os.environ.get(
 ).rstrip("/")
 PUBLIC_SCRIPTS = (
     "install-hook.sh",
+    "install-hook.ps1",
     "uninstall-hook.sh",
+    "uninstall-hook.ps1",
     "install_hook.py",
     "uninstall_hook.py",
     "continuum_context_inject.py",
@@ -239,8 +241,9 @@ def _script_route(name: str):
     """Public, and a redirect rather than a file read: the scripts live at the
     repo root and are served straight off GitHub, so nothing about the install
     flow depends on what this container happens to have on disk. `install-hook.sh`
-    is a thin bootstrap that finds a Python and hands off to `install_hook.py`,
-    which is the real installer; `install_hook.py` in turn pulls the `continuum_*`
+    and `install-hook.ps1` are thin per-platform bootstraps that find a Python
+    and hand off to `install_hook.py`, which is the real installer everywhere;
+    `install_hook.py` in turn pulls the `continuum_*`
     hook scripts through these same URLs. Only the token (from the dashboard's
     Connections page) is secret, and it never travels through here."""
 

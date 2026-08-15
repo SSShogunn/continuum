@@ -7,11 +7,12 @@ memory_search, plus a SessionEnd hook that queues memory candidates for review.
 Safe to re-run (idempotent) — re-running just refreshes the token and hook
 scripts, and won't duplicate the settings.json entry.
 
-This is the real installer for every platform; `install-hook.sh` is a thin
-bootstrap that finds a Python and hands off to here. Usually you want that
-instead:
+This is the real installer for every platform; `install-hook.sh` and
+`install-hook.ps1` are thin bootstraps that find a Python and hand off to here.
+Usually you want one of those instead:
 
-  curl -fsSL https://continuum-mcp.sshogunn.org/install-hook.sh | CONTINUUM_TOKEN=<token> bash
+  Linux/macOS   curl -fsSL https://continuum-mcp.sshogunn.org/install-hook.sh | CONTINUUM_TOKEN=<token> bash
+  Windows       $env:CONTINUUM_TOKEN="<token>"; irm https://continuum-mcp.sshogunn.org/install-hook.ps1 | iex
 
 <token> comes from the dashboard's Connections page ("Generate token"). If
 CONTINUUM_TOKEN isn't set, this prompts for it interactively.
@@ -58,10 +59,12 @@ def read_token():
     if token:
         return token
     if not sys.stdin.isatty():
-        fail(
-            "No CONTINUUM_TOKEN provided and no terminal to prompt on. Re-run with:\n"
-            "  curl -fsSL %s/install-hook.sh | CONTINUUM_TOKEN=<token> bash" % CONTINUUM_URL
+        retry = (
+            '  $env:CONTINUUM_TOKEN="<token>"; irm %s/install-hook.ps1 | iex' % CONTINUUM_URL
+            if os.name == "nt"
+            else "  curl -fsSL %s/install-hook.sh | CONTINUUM_TOKEN=<token> bash" % CONTINUUM_URL
         )
+        fail("No CONTINUUM_TOKEN provided and no terminal to prompt on. Re-run with:\n" + retry)
     token = getpass.getpass("Paste your Continuum token (from the dashboard's Connections page): ").strip()
     if not token:
         fail("No token provided — aborting.")

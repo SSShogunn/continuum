@@ -3,7 +3,7 @@
 #
 # A bootstrap only: it locates a Python 3.8+, downloads install_hook.py, and
 # hands off. The installed hooks are Python too, so the same ones run on every
-# platform.
+# platform. Windows PowerShell has its own bootstrap, install-hook.ps1.
 #
 # Usage:
 #   curl -fsSL https://continuum-mcp.sshogunn.org/install-hook.sh | CONTINUUM_TOKEN=<token> bash
