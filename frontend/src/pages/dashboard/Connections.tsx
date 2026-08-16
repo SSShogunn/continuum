@@ -5,10 +5,11 @@ import { maskSecret } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
+import { Separator } from "@/components/ui/separator";
 import { Page, Section } from "@/components/page";
 import { ErrorState } from "@/components/states";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plug } from "lucide-react";
+import { ChevronDown, Plug } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -17,6 +18,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface Connection {
@@ -108,7 +114,7 @@ export default function ConnectionsPage() {
   const [newToken, setNewToken] = useState<string | null>(null);
   const [minting, setMinting] = useState(false);
   const [mintError, setMintError] = useState<string | null>(null);
-  const [installOpen, setInstallOpen] = useState(false);
+  const [setupOpen, setSetupOpen] = useState(false);
   const [installPlatform, setInstallPlatform] = useState<InstallPlatform>(detectPlatform);
   const [installCopied, setInstallCopied] = useState(false);
 
@@ -223,9 +229,65 @@ export default function ConnectionsPage() {
                   onCheckedChange={toggleHookEnabled}
                 />
               </div>
-              <Button variant="outline" size="sm" onClick={() => setInstallOpen(true)}>
-                Set up auto-context for Claude Code
-              </Button>
+              <Collapsible open={setupOpen} onOpenChange={setSetupOpen}>
+                <CollapsibleTrigger className="group flex w-full items-center justify-between gap-2 text-left text-sm font-medium hover:text-primary">
+                  Set up auto-context for Claude Code
+                  <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform duration-200 group-data-[state=open]:rotate-180" />
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="space-y-3 pt-3">
+                    <Separator />
+                    <p className="text-muted-foreground text-xs">
+                      Injects relevant memory into every message automatically, instead of
+                      relying on Claude to call memory_search itself — scoped to whichever
+                      project workspace Claude has already picked for the current directory
+                      (falling back to &quot;default&quot;), plus your default workspace so
+                      cross-project facts still surface.
+                    </p>
+                    {newToken ? (
+                      <Tabs
+                        value={installPlatform}
+                        onValueChange={(value) => {
+                          setInstallPlatform(value as InstallPlatform);
+                          setInstallCopied(false);
+                        }}
+                        className="space-y-3"
+                      >
+                        <TabsList>
+                          <TabsTrigger value="unix">macOS / Linux</TabsTrigger>
+                          <TabsTrigger value="windows">Windows</TabsTrigger>
+                        </TabsList>
+                        {(["unix", "windows"] as const).map((os) => (
+                          <TabsContent key={os} value={os} className="space-y-3">
+                            <code className="block text-xs break-all rounded border border-border bg-muted/40 p-3 font-mono">
+                              {installCommand(os, maskSecret(newToken))}
+                            </code>
+                            <Button onClick={copyInstallCommand} variant="outline" size="sm">
+                              {installCopied ? "Copied!" : "Copy command"}
+                            </Button>
+                          </TabsContent>
+                        ))}
+                        <p className="text-muted-foreground text-xs">
+                          {installPlatform === "windows"
+                            ? "Run it in PowerShell. Needs Python 3.8+ on PATH — the hooks themselves are Python, so the same ones run on every platform."
+                            : "Run it in a terminal. Needs Python 3.8+ on PATH — the hooks themselves are Python, so the same ones run on every platform."}{" "}
+                          The token is masked on screen; the copy button places the full working
+                          command on your clipboard.
+                        </p>
+                      </Tabs>
+                    ) : (
+                      <div className="space-y-2">
+                        <Button onClick={mintToken} disabled={minting} variant="outline" size="sm">
+                          {minting ? "Generating…" : "Generate a token to get the install command"}
+                        </Button>
+                        {mintError && (
+                          <p className="text-destructive text-xs font-mono">{mintError}</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
             </CardContent>
           </Card>
         </Section>
@@ -288,59 +350,6 @@ export default function ConnectionsPage() {
         )}
         </div>
       </Page>
-
-      <Dialog open={installOpen} onOpenChange={setInstallOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Auto-context for Claude Code</DialogTitle>
-            <DialogDescription>
-              Injects relevant memory into every message automatically, instead of relying on
-              Claude to call memory_search itself — scoped to whichever project workspace Claude
-              has already picked for the current directory (falling back to &quot;default&quot;),
-              plus your default workspace so cross-project facts still surface.
-            </DialogDescription>
-          </DialogHeader>
-          {newToken ? (
-            <Tabs
-              value={installPlatform}
-              onValueChange={(value) => {
-                setInstallPlatform(value as InstallPlatform);
-                setInstallCopied(false);
-              }}
-              className="space-y-3"
-            >
-              <TabsList>
-                <TabsTrigger value="unix">macOS / Linux</TabsTrigger>
-                <TabsTrigger value="windows">Windows</TabsTrigger>
-              </TabsList>
-              {(["unix", "windows"] as const).map((os) => (
-                <TabsContent key={os} value={os} className="space-y-3">
-                  <code className="block text-xs break-all rounded border border-border bg-muted/40 p-3 font-mono">
-                    {installCommand(os, maskSecret(newToken))}
-                  </code>
-                  <Button onClick={copyInstallCommand} variant="outline" size="sm">
-                    {installCopied ? "Copied!" : "Copy command"}
-                  </Button>
-                </TabsContent>
-              ))}
-              <p className="text-muted-foreground text-xs">
-                {installPlatform === "windows"
-                  ? "Run it in PowerShell. Needs Python 3.8+ on PATH — the hooks themselves are Python, so the same ones run on every platform."
-                  : "Run it in a terminal. Needs Python 3.8+ on PATH — the hooks themselves are Python, so the same ones run on every platform."}{" "}
-                The token is masked on screen; the copy button places the full working command on
-                your clipboard.
-              </p>
-            </Tabs>
-          ) : (
-            <div className="space-y-2">
-              <Button onClick={mintToken} disabled={minting} variant="outline" size="sm">
-                {minting ? "Generating…" : "Generate a token to get the install command"}
-              </Button>
-              {mintError && <p className="text-destructive text-xs font-mono">{mintError}</p>}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={pendingDisconnect !== null} onOpenChange={(open) => !open && setPendingDisconnect(null)}>
         <DialogContent>
