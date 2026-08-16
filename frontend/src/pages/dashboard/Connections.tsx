@@ -215,15 +215,12 @@ export default function ConnectionsPage() {
           <Card>
             <CardContent className="space-y-4">
               <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className="text-sm font-medium">Auto-context injection</p>
-                  <p className="text-muted-foreground text-xs mt-0.5">
-                    Lets the Claude Code hook and other connected clients pull relevant memory
-                    into every message automatically. Turn off to stop all automatic retrieval
-                    for your account.
-                  </p>
-                </div>
+                <p className="text-muted-foreground text-sm">
+                  Adds relevant memory to every message automatically, so you don&apos;t have to
+                  ask for it.
+                </p>
                 <Switch
+                  aria-label="Auto-context"
                   checked={hookEnabled ?? true}
                   disabled={hookEnabled === null || hookToggling}
                   onCheckedChange={toggleHookEnabled}
@@ -231,19 +228,12 @@ export default function ConnectionsPage() {
               </div>
               <Collapsible open={setupOpen} onOpenChange={setSetupOpen}>
                 <CollapsibleTrigger className="group flex w-full items-center justify-between gap-2 text-left text-sm font-medium hover:text-primary">
-                  Set up auto-context for Claude Code
+                  Set up for Claude Code
                   <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform duration-200 group-data-[state=open]:rotate-180" />
                 </CollapsibleTrigger>
                 <CollapsibleContent>
                   <div className="space-y-3 pt-3">
                     <Separator />
-                    <p className="text-muted-foreground text-xs">
-                      Injects relevant memory into every message automatically, instead of
-                      relying on Claude to call memory_search itself — scoped to whichever
-                      project workspace Claude has already picked for the current directory
-                      (falling back to &quot;default&quot;), plus your default workspace so
-                      cross-project facts still surface.
-                    </p>
                     {newToken ? (
                       <Tabs
                         value={installPlatform}
@@ -269,10 +259,9 @@ export default function ConnectionsPage() {
                         ))}
                         <p className="text-muted-foreground text-xs">
                           {installPlatform === "windows"
-                            ? "Run it in PowerShell. Needs Node 18+ on PATH — the hooks themselves are Node, so the same ones run on every platform."
-                            : "Run it in a terminal. Needs Node 18+ on PATH — the hooks themselves are Node, so the same ones run on every platform."}{" "}
-                          The token is masked on screen; the copy button places the full working
-                          command on your clipboard.
+                            ? "Run it in PowerShell. Requires Node 18 or newer."
+                            : "Run it in a terminal. Requires Node 18 or newer."}{" "}
+                          Use the copy button — your token is hidden above.
                         </p>
                       </Tabs>
                     ) : (

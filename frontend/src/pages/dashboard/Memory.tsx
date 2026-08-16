@@ -961,8 +961,7 @@ export default function MemoryPage() {
           <DialogHeader>
             <DialogTitle>{editor?.mode === "edit" ? `Edit ${editor.name}` : "New memory"}</DialogTitle>
             <DialogDescription>
-              Saved through the same path as an AI client's `memory_save` — re-embedded and re-indexed
-              into the knowledge graph on write.
+              Searchable by your AI clients as soon as you save.
             </DialogDescription>
           </DialogHeader>
 
