@@ -135,95 +135,34 @@ class RequestLoggingMiddleware(Middleware):
 
 _INSTRUCTIONS = """
 CRITICAL — Memory-First Protocol: Continuum is this user's persistent, personal memory. Before
-answering ANY substantive message — including the very first message of a new conversation — call
-`memory_search` (or `memory_list` for a broad "what do you know about me" ask) for the current
-topic. Do this unprompted; never ask the user whether to check memory, and never answer from
-assumption or ask the user to repeat context first when a search could surface it. This is the
-single most important behavior this server exists to enable — treat it as a hard requirement, not
-a suggestion.
-
-Continuum is multi-tenant: memories are scoped to the caller's authenticated account only, and any
-saved entry can be reviewed or removed anytime via `memory_list`/`memory_delete` or the dashboard.
-Auto-saving without asking first is this tool's intended design for the account owner, not a
-bypass of one.
+answering ANY substantive message — including the very first of a new conversation — call
+`memory_search` (or `memory_list` for a broad "what do you know about me" ask). Do this unprompted;
+never ask whether to check memory, never answer from assumption when a search could surface it.
+Memories are scoped to the caller's account alone. Auto-saving without asking is intended here.
 
 ## Memory rules
 
-1. **Search proactively, every conversation, every new topic.** At the start of every conversation
-   — before the first substantive reply — call `memory_search` for the topic. Keep searching as
-   new topics, projects, people, or "what did I say about X" questions come up. Use
-   `memory_fact_search` for narrow factual lookups.
+1. **Search proactively** — every conversation, every new topic. `memory_fact_search` for narrow
+   lookups; `memory_list` first for "what do you remember?".
 
-2. **Don't save mid-stream.** Track candidates mentally as the conversation runs — preferences,
-   decisions, people/projects, explicit "remember this" asks — but don't call `memory_save` on
-   every small reveal. Each call costs real output tokens and stays in the transcript for the rest
-   of the session.
+2. **Workspace = project. Never land on `default` by omission.** Anything tied to a specific
+   codebase or project (status, decisions, bugs, task context) MUST pass an explicit `workspace`:
+   a kebab-cased slug from that project's repo/directory name. Call `memory_list_workspaces` first
+   and reuse a close match (`continuum` vs `continuum-app`) rather than minting a near-duplicate.
+   Reserve `default` for what spans projects — identity, cross-project preferences, people. If no
+   workspace fits this project, ask which to create instead of silently using `default`.
 
-3. **Save at boundaries, batched.** When a topic or task wraps up (or the conversation ends), save
-   everything worth keeping from that segment in as few calls as reasonable — one per
-   entity/topic, not one per fact. No need to ask first.
-    - Exception: save immediately if the user signals urgency ("before I close this", "save this
-      now").
+   With filesystem access, keep `~/.continuum/workspace-map.json` in sync: a flat JSON object
+   mapping your exact working-directory path to that slug. The UserPromptSubmit hook only reads
+   this file by cwd, with no project-detection of its own — this mapping auto-scopes messages here.
 
-4. **Keep `content` lean.** Dense facts/bullets, not prose that restates context the user already
-   gave. Don't duplicate another memory's content — reference it by name instead. For large,
-   stable material (configs, specs, a doc already on disk), save a short `reference` pointer
-   instead of copying it in.
+3. **Set a `recall` tier, not just a `type`.** `always` = standing rule, injected every message;
+   `relevance` (default) = facts surfaced on semantic match; `manual` = explicit lookup only.
 
-5. **Update, don't duplicate.** Reuse an existing memory's `name` slug to overwrite it rather than
-   creating a near-duplicate entry. When new information replaces an *older, separately-named*
-   memory rather than just updating one in place, pass `supersedes=["old-name"]` on `memory_save`
-   instead of leaving the stale entry to keep competing in search results.
+4. **Save at boundaries, batched** — not mid-stream; one call per topic/entity, `content` lean.
 
-   To *add* to an entry that already exists, use `memory_append(name, text)` — never re-send the
-   whole `content` just to tack on a line. Reproducing a long body from memory is how entries
-   silently lose material.
-
-6. For "what do you know about me?" / "what do you remember?", call `memory_list` first, then
-   `memory_search`.
-
-7. **Default to a project-scoped workspace, not `default`.** For anything tied to a specific
-   codebase or project (its status, decisions, bugs, task context — typically `type=project`),
-   derive a workspace slug from the current project (its repo/directory name, kebab-cased) and
-   pass it explicitly as `workspace` on every call for that entry — don't leave it on `default` by
-   omission. Call `memory_list_workspaces` first and reuse an existing close match (`continuum` vs
-   `continuum-app`) instead of minting a near-duplicate. Reserve `default` for what isn't tied to
-   one project — the user's identity, cross-project preferences, people. If the user asks to
-   organize memory some other way (e.g. work vs. personal instead of per-project), follow that
-   instead.
-
-   If you have local filesystem access (e.g. running inside Claude Code, not the hosted web
-   client), also keep `~/.continuum/workspace-map.json` in sync whenever you settle on a project's
-   workspace: a flat JSON object mapping the exact working-directory path you're running in (as
-   given in your environment context) to the workspace slug — read the existing file if present,
-   set/update the one entry for this directory, and write it back. The passive `UserPromptSubmit`
-   hook (`install-hook.sh`) is intentionally dumb — it only reads this file by cwd, with no
-   project-detection of its own — so this mapping is what lets it auto-scope future messages in
-   this project the same way your own tool calls do.
-
-8. If the user wants to back up, migrate, or move memories between workspaces/accounts/tools, use
-   `memory_export`/`memory_import` rather than manually re-saving each entry.
-
-9. **Set a `recall` tier, not just a `type`.** Every entry has two independent axes: `type` is what
-   it's *about* (user, preference, project, reference); `recall` is *how it reaches you*. Pick both.
-    - `recall="always"` — a standing behavioral rule: how you must act going forward, not a fact
-      about the user's world (e.g. "never call chromium-cli/Playwright to self-verify UI unless
-      explicitly asked", "always respond in English only"). The auto-context hook (`/hook/context`)
-      injects these verbatim on every message regardless of topic, bypassing the relevance gate and
-      the similarity ranking everything else goes through. Keep `content` to the rule plus its
-      *why* — it costs prompt space on every single turn. Reserve it for rules that hold
-      unconditionally; if it only matters sometimes, it's a `relevance` preference instead.
-    - `recall="relevance"` (default) — contextual facts, surfaced only when the current message is
-      semantically close to them.
-    - `recall="manual"` — bulky or noisy material that shouldn't ride every prompt; returned only
-      on an explicit `memory_search`/`memory_list`.
-   Never bury a standing rule inside a `relevance` blob — a rule that only surfaces when the topic
-   happens to match isn't being enforced. Save it as its own `always` entry, and pass `supersedes`
-   if that leaves the original redundant.
-
-## Naming convention
-kebab-case, descriptive: `user-role`, `project-continuum-status`, `preference-coding-style`,
-`person-alice-context`.
+5. **Update, don't duplicate.** Reuse a `name` to overwrite, `supersedes=["old"]` when replacing a
+   differently-named entry, `memory_append` to add a line. Names: kebab-case, descriptive.
 """.strip()
 
 _jwt_verifier = auth.build_verifier()
@@ -397,7 +336,7 @@ async def hook_context(request: Request) -> Response:
 
     started = time.perf_counter()
     result = await prompt.build_hook_context(
-        owner, query, extra_owner=extra_owner, recent=body.get("recent")
+        owner, query, extra_owner=extra_owner, recent=body.get("recent"), workspace=workspace
     )
     # Logged like a tool call so injections show up in the Activity view next to
     # real ones: without a record of what was auto-injected there is no way to
@@ -1091,6 +1030,13 @@ async def verify_quote(url: str, quote: str, context_chars: int = 200) -> str:
     )
 
 
+def _read_scope(workspace: str) -> list[tuple[str, str]]:
+    scope = [(workspace, auth.scoped_owner(workspace))]
+    if workspace != "default":
+        scope.append(("default", auth.scoped_owner("default")))
+    return scope
+
+
 @mcp.tool
 async def memory_save(
     name: str,
@@ -1101,7 +1047,7 @@ async def memory_save(
     supersedes: list[str] | None = None,
     recall: str | None = None,
 ) -> str:
-    """Save or update a persistent memory entry (e.g. facts about the user, their preferences, or ongoing project context) so it can be recalled later across sessions via memory_search. `name` is a unique slug — saving again with the same name overwrites the existing entry. `type` categorizes the subject (e.g. user, preference, project, reference). `recall` controls delivery, independently of `type`: "always" for a standing behavioral rule that must be injected into every message regardless of topic ("never do X unless asked"), "relevance" (the default) for contextual facts surfaced only when the message is semantically close, "manual" for bulky material that should never be auto-injected. `workspace` namespaces the entry (e.g. work, personal) — defaults to "default". `supersedes` is a list of existing memory names that this entry replaces — they get archived (hidden from search/list, not deleted) instead of left to compete on similarity forever."""
+    """Save or update a persistent memory entry (e.g. facts about the user, their preferences, or ongoing project context) so it can be recalled later across sessions via memory_search. `name` is a unique slug — saving again with the same name overwrites the existing entry. `type` categorizes the subject (e.g. user, preference, project, reference). `recall` controls delivery, independently of `type`: "always" for a standing behavioral rule that must be injected into every message regardless of topic ("never do X unless asked"), "relevance" (the default) for contextual facts surfaced only when the message is semantically close, "manual" for bulky material that should never be auto-injected. `workspace` namespaces the entry. It defaults to "default", but do NOT rely on that default for project work: anything tied to a specific codebase or project (its status, decisions, bugs, task context) must pass an explicit kebab-cased slug derived from that project's repo/directory name. Call `memory_list_workspaces` first and reuse an existing close match rather than minting a near-duplicate; if no workspace fits the current project, ask the user which to create instead of silently writing to "default". Reserve "default" for what spans every project — the user's identity, cross-project preferences, people. `supersedes` is a list of existing memory names that this entry replaces — they get archived (hidden from search/list, not deleted) instead of left to compete on similarity forever."""
     owner = auth.scoped_owner(workspace)
     record = await memory.save(
         name, type, description, content, owner=owner, supersedes=supersedes, recall=recall
@@ -1111,19 +1057,26 @@ async def memory_save(
 
 @mcp.tool
 async def memory_search(query: str, top_k: int = 5, type: str | None = None, workspace: str = "default") -> str:
-    """Semantically search saved memory entries and return the most relevant ones with their full content. Optionally filter by `type`. `workspace` scopes the search — defaults to "default".
+    """Semantically search saved memory entries and return the most relevant ones with their full content. Optionally filter by `type`. `workspace` scopes the search and defaults to "default"; passing a project workspace searches that workspace AND "default" together, so project-scoped work still sees identity, preferences, and standing rules. Each result is labelled with the workspace it came from.
 
     Call this proactively, not just at the start of a conversation — any time the current message
     references something that might already be known: a named project/machine/person, "my setup",
     "like we did before", "what did I decide about X", or any request that would benefit from prior
     context you don't already have in this conversation. When in doubt, search — it's cheap to find
     nothing, and expensive to silently re-ask the user for facts they already gave you."""
-    owner = auth.scoped_owner(workspace)
-    results = await memory.search(query, top_k=top_k, type=type, owner=owner)
+    scope = _read_scope(workspace)
+    per_owner = await asyncio.gather(
+        *(memory.search(query, top_k=top_k, type=type, owner=owner) for _, owner in scope)
+    )
+    merged: dict[str, dict] = {}
+    for (name, _), entries in zip(scope, per_owner):
+        for entry in entries:
+            merged.setdefault(entry["name"], {**entry, "workspace": name})
+    results = sorted(merged.values(), key=lambda e: e["score"], reverse=True)[:top_k]
     if not results:
         return "No memory entries found."
     blocks = [
-        f"## {r['name']} (type={r['type']}, recall={r['recall']}, score={r['score']:.3f})\n{r['description']}\n\n{r['content']}"
+        f"## {r['name']} (workspace={r['workspace']}, type={r['type']}, recall={r['recall']}, score={r['score']:.3f})\n{r['description']}\n\n{r['content']}"
         for r in results
     ]
     return "\n\n---\n\n".join(blocks)
@@ -1131,18 +1084,26 @@ async def memory_search(query: str, top_k: int = 5, type: str | None = None, wor
 
 @mcp.tool
 async def memory_fact_search(query: str, top_k: int = 5, workspace: str = "default") -> str:
-    """Semantically search facts in the knowledge graph — more precise than memory_search for narrow questions, since each fact is a single typed relationship between two entities rather than a full memory blob. Superseded (outdated) facts are excluded. `workspace` scopes the search — defaults to "default".
+    """Semantically search facts in the knowledge graph — more precise than memory_search for narrow questions, since each fact is a single typed relationship between two entities rather than a full memory blob. Superseded (outdated) facts are excluded. `workspace` scopes the search and defaults to "default"; passing a project workspace searches that workspace AND "default" together, so project-scoped work still sees cross-project facts.
 
     Reach for this over memory_search when the question is narrow and factual (a specific config
     value, IP, decision, or status) rather than "tell me everything about X" — it returns just the
     matching facts instead of whole memory blobs, so it's the cheaper first call for a pointed
     question."""
-    owner = auth.scoped_owner(workspace)
-    results = await search.fact_search(owner, query, top_k=top_k)
+    scope = _read_scope(workspace)
+    per_owner = await asyncio.gather(
+        *(search.fact_search(owner, query, top_k=top_k) for _, owner in scope)
+    )
+    merged: dict[tuple, dict] = {}
+    for (name, _), facts in zip(scope, per_owner):
+        for fact in facts:
+            key = (fact["source"], fact["predicate"], fact["target"], fact["fact"])
+            merged.setdefault(key, {**fact, "workspace": name})
+    results = sorted(merged.values(), key=lambda f: f["score"], reverse=True)[:top_k]
     if not results:
         return "No facts found."
     return "\n".join(
-        f"- {r['source']} {r['predicate']} {r['target']}: {r['fact']} (from {r['episode_name']})"
+        f"- [{r['workspace']}] {r['source']} {r['predicate']} {r['target']}: {r['fact']} (from {r['episode_name']})"
         for r in results
     )
 
@@ -1168,13 +1129,23 @@ async def memory_graph_search(entity: str, workspace: str = "default") -> str:
 
 @mcp.tool
 async def memory_list(type: str | None = None, workspace: str = "default", include_archived: bool = False) -> str:
-    """List all saved memory entries (name, type, recall tier, description, last updated) without their full content. Optionally filter by `type`. `workspace` scopes the listing — defaults to "default". Set `include_archived=True` to also show entries archived via `supersedes` or `memory_archive`."""
-    owner = auth.scoped_owner(workspace)
-    entries = await memory.list_entries(type=type, owner=owner, include_archived=include_archived)
+    """List all saved memory entries (name, type, recall tier, description, last updated) without their full content. Optionally filter by `type`. `workspace` scopes the listing and defaults to "default"; passing a project workspace lists that workspace AND "default" together, each entry labelled with the workspace it lives in. Set `include_archived=True` to also show entries archived via `supersedes` or `memory_archive`."""
+    scope = _read_scope(workspace)
+    per_owner = await asyncio.gather(
+        *(
+            memory.list_entries(type=type, owner=owner, include_archived=include_archived)
+            for _, owner in scope
+        )
+    )
+    merged: dict[str, dict] = {}
+    for (name, _), entries in zip(scope, per_owner):
+        for entry in entries:
+            merged.setdefault(entry["name"], {**entry, "workspace": name})
+    entries = sorted(merged.values(), key=lambda e: e["updated_at"], reverse=True)
     if not entries:
         return "No memory entries found."
     return "\n".join(
-        f"- {e['name']} [{e['type']}]: {e['description']} (updated {e['updated_at']})"
+        f"- [{e['workspace']}] {e['name']} [{e['type']}]: {e['description']} (updated {e['updated_at']})"
         + (f" [recall={e['recall']}]" if e.get("recall") not in (None, "relevance") else "")
         + (f" (archived {e['archived_at']})" if e.get("archived_at") else "")
         for e in entries
@@ -1252,8 +1223,14 @@ EXPORT_VERSION = "1"
 async def memory_export(workspace: str = "default") -> str:
     """Export every memory entry in a workspace (including archived ones) as a portable JSON
     document, so it can be backed up or loaded into another tool. `workspace` scopes the export —
-    defaults to "default". Pair with `memory_import` to move memories between workspaces or
-    accounts."""
+    defaults to "default".
+
+    Whenever the user wants to back up, migrate, or move memories between workspaces, accounts, or
+    tools, reach for this plus `memory_import` — do NOT hand-re-save each entry with `memory_save`.
+    Manual re-saving silently loses `recall`, `type`, and timestamps, drops archived entries
+    entirely, and risks corrupting long bodies you reproduce from context. To move entries between
+    workspaces: `memory_export` the source, then `memory_import` that JSON with the destination
+    `workspace`, then delete the originals once you have confirmed the copies landed."""
     owner = auth.scoped_owner(workspace)
     entries = await memory.list_full(owner=owner)
     payload = {
@@ -1273,7 +1250,11 @@ async def memory_import(data: str, workspace: str = "default") -> str:
     `memory_export`) or a plain JSON array of objects with at least `name` and `content` — so
     exports from other memory tools can be adapted with minimal reshaping. Entries reuse `name` as
     the unique key, so importing overwrites an existing entry with the same name (and unarchives
-    it) rather than duplicating it."""
+    it) rather than duplicating it.
+
+    This is the correct way to move memories into a project workspace — pair it with
+    `memory_export` rather than re-saving each entry by hand, which loses metadata and archived
+    entries."""
     owner = auth.scoped_owner(workspace)
     try:
         parsed = json.loads(data)

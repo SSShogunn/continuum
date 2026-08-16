@@ -134,6 +134,7 @@ async def build_hook_context(
     top_k: int = 3,
     extra_owner: str | None = None,
     recent: str | None = None,
+    workspace: str = "default",
 ) -> dict:
     """Context for automatic per-message injection (e.g. a UserPromptSubmit hook).
     Returns None when nothing clears the relevance gate and no standing rules
@@ -153,7 +154,9 @@ async def build_hook_context(
     `extra_owner` (e.g. the account's `default` workspace when `owner` is a
     project-scoped one) is merged in so switching to a project workspace can't
     hide cross-project rules or facts like identity/preferences that still live in
-    `default`.
+    `default`. `workspace` is that scope's name, stated in the rendered header so
+    the model knows which workspace it is in without having to infer it from cwd —
+    a fact it is handed rather than a rule it has to remember.
 
     `recent` is the tail of the conversation. A short message is usually deictic
     ("do the same for the other one", "why?") and embeds nowhere near anything
@@ -213,7 +216,11 @@ async def build_hook_context(
     if not directives and not entries and not facts:
         return {"context": None, **injected}
 
-    parts = ["[Continuum memory]"]
+    scope_note = (
+        f"[Continuum memory — active workspace: {workspace}"
+        + (" (+ default)]" if extra_owner else "]")
+    )
+    parts = [scope_note]
     if directives:
         parts.append(_directive_section(list(directives.values())))
     if entries or facts:
@@ -231,7 +238,10 @@ async def build_hook_context(
                     for e in linked
                 )
             )
-        related.append("(call memory_search / memory_fact_search for full detail if needed)")
+        related.append(
+            f'(call memory_search / memory_fact_search with workspace="{workspace}" '
+            "for full detail if needed)"
+        )
         parts.append("\n\n".join(related))
     return {"context": "\n\n".join(parts), **injected}
 
