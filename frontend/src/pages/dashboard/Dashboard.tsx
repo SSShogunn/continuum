@@ -10,23 +10,12 @@ import {
   Tooltip,
   BarChart,
   Bar,
-  AreaChart,
-  Area,
 } from "recharts";
 import { Card, CardContent } from "@/components/ui/card";
 import { Page, Section } from "@/components/page";
 import { EmptyState, ErrorState, StatGridSkeleton, PanelSkeleton } from "@/components/states";
-import { relativeTime, stringToHue } from "@/lib/utils";
 import { useApiClient } from "@/lib/api-client";
 import { AlertTriangle, BarChart3, Gauge, Timer, Database, Share2, Plug } from "lucide-react";
-
-const CHART_COLORS = [
-  "var(--chart-1)",
-  "var(--chart-2)",
-  "var(--chart-3)",
-  "var(--chart-4)",
-  "var(--chart-5)",
-];
 
 interface ToolStat {
   tool: string;
@@ -48,15 +37,6 @@ interface Stats {
   error_rate: number;
   per_tool: ToolStat[];
   timeseries: TimeseriesPoint[];
-}
-
-interface ActivityRow {
-  tool: string;
-  status: string;
-  duration_ms: number;
-  timestamp: string;
-  arguments: string | null;
-  error: string | null;
 }
 
 interface MemoryStats {
@@ -145,7 +125,6 @@ export default function StatsPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [recentErrors, setRecentErrors] = useState<ActivityRow[]>([]);
   const [memoryStats, setMemoryStats] = useState<MemoryStats | null>(null);
   const [graphStats, setGraphStats] = useState<GraphStats | null>(null);
 
@@ -160,11 +139,6 @@ export default function StatsPage() {
         setError(String(e));
         setLoading(false);
       });
-
-    api
-      .get<{ activity: ActivityRow[] }>("/api/stats/activity?limit=5&status=error")
-      .then((data) => setRecentErrors(data.activity ?? []))
-      .catch(() => {});
 
     api
       .get<MemoryStats>("/api/memory/stats")
@@ -183,11 +157,6 @@ export default function StatsPage() {
         Math.max(stats.total_requests, 1)
       : 0;
 
-  const tools = useMemo(
-    () => Array.from(new Set(stats?.timeseries.map((p) => p.tool) ?? [])).sort(),
-    [stats]
-  );
-
   const dailyTotals = useMemo(() => {
     if (!stats) return [];
     const byDay = new Map<string, { day: string; calls: number; errors: number }>();
@@ -200,20 +169,28 @@ export default function StatsPage() {
     return Array.from(byDay.values()).sort((a, b) => a.day.localeCompare(b.day));
   }, [stats]);
 
-  const stackedByDay = useMemo(() => {
+  const toolSeries = useMemo(() => {
     if (!stats) return [];
-    const byDay = new Map<string, Record<string, number | string>>();
+    const days = Array.from(new Set(stats.timeseries.map((p) => p.day))).sort();
+    const byTool = new Map<string, Map<string, number>>();
     for (const p of stats.timeseries) {
-      const entry = byDay.get(p.day) ?? { day: p.day };
-      entry[p.tool] = p.calls;
-      byDay.set(p.day, entry);
+      const series = byTool.get(p.tool) ?? new Map<string, number>();
+      series.set(p.day, (series.get(p.day) ?? 0) + p.calls);
+      byTool.set(p.tool, series);
     }
-    return Array.from(byDay.values()).sort((a, b) =>
-      (a.day as string).localeCompare(b.day as string)
-    );
+    return Array.from(byTool.entries())
+      .map(([tool, series]) => ({
+        tool,
+        total: Array.from(series.values()).reduce((sum, n) => sum + n, 0),
+        points: days.map((day) => ({ day, calls: series.get(day) ?? 0 })),
+      }))
+      .sort((a, b) => b.total - a.total);
   }, [stats]);
 
-  const mostConnected = graphStats?.top_entities?.[0];
+  const toolPeak = useMemo(
+    () => Math.max(1, ...toolSeries.flatMap((s) => s.points.map((p) => p.calls))),
+    [toolSeries]
+  );
 
   return (
     <Page
@@ -320,35 +297,46 @@ export default function StatsPage() {
 
           <Section title="Calls by tool over time">
             <Card surface="chrome">
-              <CardContent className="h-64 pt-4">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={stackedByDay}>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                    <XAxis
-                      dataKey="day"
-                      tickFormatter={(d: string) => new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
-                      tick={{ fontSize: 11 }}
-                    />
-                    <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
-                    <Tooltip
-                      labelFormatter={(d) => (typeof d === "string" ? new Date(d).toLocaleDateString() : d)}
-                      contentStyle={TOOLTIP_CONTENT_STYLE}
-                      itemStyle={TOOLTIP_ITEM_STYLE}
-                      labelStyle={TOOLTIP_LABEL_STYLE}
-                    />
-                    {tools.map((tool, i) => (
-                      <Area
-                        key={tool}
-                        type="monotone"
-                        dataKey={tool}
-                        stackId="1"
-                        stroke={CHART_COLORS[i % CHART_COLORS.length]}
-                        fill={CHART_COLORS[i % CHART_COLORS.length]}
-                        fillOpacity={0.5}
-                      />
-                    ))}
-                  </AreaChart>
-                </ResponsiveContainer>
+              <CardContent>
+                <p className="text-muted-foreground text-xs mb-4">
+                  One line per tool, drawn on a shared scale so heights compare directly.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-x-6 gap-y-5">
+                  {toolSeries.map((series) => (
+                    <div key={series.tool}>
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="font-mono text-xs truncate" title={series.tool}>
+                          {series.tool}
+                        </span>
+                        <span className="text-xs text-muted-foreground tabular-nums shrink-0">
+                          {series.total}
+                        </span>
+                      </div>
+                      <div className="h-12 mt-1.5">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={series.points} margin={{ top: 3, right: 2, bottom: 0, left: 2 }}>
+                            <XAxis dataKey="day" hide />
+                            <YAxis hide domain={[0, toolPeak]} />
+                            <Tooltip
+                              labelFormatter={(d) => (typeof d === "string" ? new Date(d).toLocaleDateString() : d)}
+                              formatter={(value: number) => [value, series.tool]}
+                              contentStyle={TOOLTIP_CONTENT_STYLE}
+                              itemStyle={TOOLTIP_ITEM_STYLE}
+                              labelStyle={TOOLTIP_LABEL_STYLE}
+                            />
+                            <Line
+                              type="monotone"
+                              dataKey="calls"
+                              stroke="var(--chart-1)"
+                              strokeWidth={2}
+                              dot={false}
+                            />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </CardContent>
             </Card>
           </Section>
@@ -381,38 +369,6 @@ export default function StatsPage() {
           </Section>
 
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            <Section
-              title="Recent errors"
-              action={
-                <Link to="/dashboard/activity" className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2">
-                  View all
-                </Link>
-              }
-            >
-              <Card surface="chrome">
-                <CardContent className="p-0">
-                  {recentErrors.length === 0 ? (
-                    <p className="text-muted-foreground text-sm p-4">No recent errors.</p>
-                  ) : (
-                    recentErrors.map((e, i) => (
-                      <Link
-                        key={`${e.timestamp}-${i}`}
-                        to="/dashboard/activity"
-                        className="relative flex items-center gap-3 pl-4 pr-3 py-2.5 border-b last:border-b-0 hover:bg-accent/50 transition-colors"
-                      >
-                        <span className="absolute left-0 top-0 bottom-0 w-0.5 bg-chart-4" />
-                        <span className="font-mono text-xs truncate flex-1 min-w-0">{e.tool}</span>
-                        <span className="text-xs text-muted-foreground truncate max-w-[40%]">
-                          {e.error ?? "—"}
-                        </span>
-                        <span className="text-xs text-muted-foreground shrink-0">{relativeTime(e.timestamp)}</span>
-                      </Link>
-                    ))
-                  )}
-                </CardContent>
-              </Card>
-            </Section>
-
             <Section title="Memory breakdown">
               <Card surface="chrome">
                 <CardContent className="space-y-3">
@@ -451,48 +407,24 @@ export default function StatsPage() {
                 </CardContent>
               </Card>
             </Section>
-          </div>
 
-          <Section title="Graph">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              <StatCard
-                label="Entities"
-                value={graphStats?.node_count ?? 0}
-                icon={Database}
-                tone="bg-chart-1/15 text-chart-1"
-              />
-              <StatCard
-                label="Edges"
-                value={graphStats?.edge_count ?? 0}
-                icon={Share2}
-                tone="bg-chart-3/15 text-chart-3"
-              />
-              <Card>
-                <CardContent className="flex items-start justify-between">
-                  <div className="min-w-0">
-                    <p className="text-muted-foreground text-xs mb-1.5">Most connected</p>
-                    <p className="text-sm font-semibold truncate">
-                      {mostConnected ? mostConnected.name : "—"}
-                    </p>
-                    {mostConnected && (
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {mostConnected.degree} connection{mostConnected.degree === 1 ? "" : "s"}
-                      </p>
-                    )}
-                  </div>
-                  <div
-                    className="flex size-8 items-center justify-center rounded-md shrink-0"
-                    style={{
-                      backgroundColor: mostConnected ? `oklch(0.7 0.16 ${stringToHue(mostConnected.type)} / 0.15)` : undefined,
-                      color: mostConnected ? `oklch(0.55 0.16 ${stringToHue(mostConnected.type)})` : undefined,
-                    }}
-                  >
-                    <Share2 className="size-4" />
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          </Section>
+            <Section title="Graph">
+              <div className="grid grid-cols-2 gap-4">
+                <StatCard
+                  label="Entities"
+                  value={graphStats?.node_count ?? 0}
+                  icon={Database}
+                  tone="bg-chart-1/15 text-chart-1"
+                />
+                <StatCard
+                  label="Edges"
+                  value={graphStats?.edge_count ?? 0}
+                  icon={Share2}
+                  tone="bg-chart-3/15 text-chart-3"
+                />
+              </div>
+            </Section>
+          </div>
         </div>
       )}
     </Page>
