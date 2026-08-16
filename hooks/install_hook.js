@@ -42,10 +42,74 @@ const HOOKS = [
 ];
 const UPDATER = ["continuum-self-update", "continuum_self_update.js"];
 
+// Progress reporting. The script arrives on stdin, but stderr is still the
+// terminal, so that's where the spinner goes — it keeps stdout clean for the
+// summary and stays out of the way when the install is piped somewhere.
+const TOTAL_STEPS = 4;
+const FANCY =
+  Boolean(process.stderr.isTTY) &&
+  process.env.TERM !== "dumb" &&
+  !process.env.NO_COLOR &&
+  !process.env.CONTINUUM_QUIET &&
+  (process.platform !== "win32" || Boolean(process.env.WT_SESSION));
+const FRAMES = FANCY ? ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] : ["-"];
+const OK = FANCY ? "✓" : "ok";
+const BAD = FANCY ? "✗" : "!!";
+
+const progress = { index: 0, label: "", timer: null, frame: 0 };
+
+function paint(symbol) {
+  process.stderr.write(`\r\u001b[2K  ${symbol} [${progress.index}/${TOTAL_STEPS}] ${progress.label}`);
+}
+
+function startStep(label) {
+  progress.index += 1;
+  progress.label = label;
+  // Without a terminal to redraw, the step is announced once it finishes —
+  // one line per step instead of a start/finish pair cluttering the log.
+  if (!FANCY) return;
+  progress.frame = 0;
+  paint(FRAMES[0]);
+  progress.timer = setInterval(() => {
+    progress.frame = (progress.frame + 1) % FRAMES.length;
+    paint(FRAMES[progress.frame]);
+  }, 80);
+  if (progress.timer.unref) progress.timer.unref();
+}
+
+function setLabel(label) {
+  progress.label = label;
+  if (FANCY) paint(FRAMES[progress.frame]);
+}
+
+function stopStep(symbol, detail) {
+  if (progress.timer) {
+    clearInterval(progress.timer);
+    progress.timer = null;
+  }
+  if (!progress.label) return;
+  const suffix = detail ? ` — ${detail}` : "";
+  if (FANCY) paint(symbol);
+  else process.stderr.write(`  ${symbol} [${progress.index}/${TOTAL_STEPS}] ${progress.label}`);
+  process.stderr.write(suffix + "\n");
+  progress.label = "";
+}
+
+function endStep(detail) {
+  stopStep(OK, detail);
+}
+
+let failed = false;
+
 function fail(message) {
-  process.stderr.write("error: " + message + "\n");
   const err = new Error(message);
   err.continuumHandled = true;
+  // Downloads run in parallel, so a dead endpoint fails all of them at once —
+  // report the first and let the rest unwind quietly.
+  if (failed) throw err;
+  failed = true;
+  stopStep(BAD);
+  process.stderr.write("error: " + message + "\n");
   throw err;
 }
 
@@ -141,13 +205,27 @@ function removeLegacy(stem) {
 }
 
 async function main() {
+  startStep("checking Node");
   checkNode();
+  endStep(process.version);
+
   const token = await readToken();
 
+  const names = HOOKS.map(([, , name]) => name).concat([UPDATER[1]]);
+  startStep(`downloading hook scripts (0/${names.length})`);
+  let done = 0;
   const sources = {};
-  for (const [, , name] of HOOKS) sources[name] = await download(name);
-  sources[UPDATER[1]] = await download(UPDATER[1]);
+  await Promise.all(
+    names.map(async (name) => {
+      sources[name] = await download(name);
+      done += 1;
+      setLabel(`downloading hook scripts (${done}/${names.length})`);
+    })
+  );
+  const bytes = names.reduce((total, name) => total + sources[name].length, 0);
+  endStep(`${Math.round(bytes / 1024)} KB`);
 
+  startStep("writing hooks and token");
   fs.mkdirSync(STATE_DIR, { recursive: true });
   fs.mkdirSync(HOOKS_DIR, { recursive: true });
   writePrivate(TOKEN_PATH, token);
@@ -168,9 +246,12 @@ async function main() {
   const updaterPath = path.join(HOOKS_DIR, UPDATER[0] + ".js");
   fs.writeFileSync(updaterPath, sources[UPDATER[1]]);
   removeLegacy(UPDATER[0]);
+  endStep(HOOKS_DIR);
 
+  startStep("registering hooks in settings.json");
   fs.mkdirSync(path.dirname(SETTINGS_PATH), { recursive: true });
   fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + "\n");
+  endStep(results.map(([, result]) => result).join(", "));
 
   const labels = {
     UserPromptSubmit: "auto-context injection",
