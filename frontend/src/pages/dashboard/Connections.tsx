@@ -187,8 +187,8 @@ export default function ConnectionsPage() {
 
   function installCommand(os: InstallPlatform, token: string) {
     return os === "windows"
-      ? `$env:CONTINUUM_TOKEN="${token}"; irm ${MCP_URL}/install-hook.ps1 | iex`
-      : `curl -fsSL ${MCP_URL}/install-hook.sh | CONTINUUM_TOKEN=${token} bash`;
+      ? `$env:CONTINUUM_TOKEN="${token}"; irm ${MCP_URL}/install_hook.js | node -`
+      : `curl -fsSL ${MCP_URL}/install_hook.js | CONTINUUM_TOKEN=${token} node`;
   }
 
   async function copyInstallCommand() {
@@ -269,8 +269,8 @@ export default function ConnectionsPage() {
                         ))}
                         <p className="text-muted-foreground text-xs">
                           {installPlatform === "windows"
-                            ? "Run it in PowerShell. Needs Python 3.8+ on PATH — the hooks themselves are Python, so the same ones run on every platform."
-                            : "Run it in a terminal. Needs Python 3.8+ on PATH — the hooks themselves are Python, so the same ones run on every platform."}{" "}
+                            ? "Run it in PowerShell. Needs Node 18+ on PATH — the hooks themselves are Node, so the same ones run on every platform."
+                            : "Run it in a terminal. Needs Node 18+ on PATH — the hooks themselves are Node, so the same ones run on every platform."}{" "}
                           The token is masked on screen; the copy button places the full working
                           command on your clipboard.
                         </p>

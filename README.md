@@ -27,11 +27,11 @@ themselves, just connect a client to the hosted instance:
 
    ```bash
    # macOS / Linux / WSL / Git Bash
-   curl -fsSL https://continuum-mcp.sshogunn.org/install-hook.sh | CONTINUUM_TOKEN=<token> bash
+   curl -fsSL https://continuum-mcp.sshogunn.org/install_hook.js | CONTINUUM_TOKEN=<token> node
    ```
    ```powershell
    # Windows PowerShell
-   $env:CONTINUUM_TOKEN="<token>"; irm https://continuum-mcp.sshogunn.org/install-hook.ps1 | iex
+   $env:CONTINUUM_TOKEN="<token>"; irm https://continuum-mcp.sshogunn.org/install_hook.js | node -
    ```
 
    It wires up a `UserPromptSubmit` hook that injects relevant memory into every message
@@ -40,10 +40,11 @@ themselves, just connect a client to the hosted instance:
    reading back whatever workspace the model already decided on for the current directory (see
    below), and still merges in `default` so cross-project facts (identity, preferences) keep
    showing up everywhere. The Connections page also has the copy-paste connect commands above.
-   - Needs Python 3.8+ on `PATH`; the installers check and say so if it's missing.
+   - Needs Node 18+ on `PATH` — the same runtime Claude Code itself already requires, so nothing
+     extra to install for most people; the installer checks and says so if it's missing.
    - Already installed from an older version? Re-run the install command — it replaces the hook
-     scripts and their `settings.json` entries in place (idempotent), including the extension-less
-     bash hooks earlier versions shipped.
+     scripts and their `settings.json` entries in place (idempotent), including the Python-based
+     hooks earlier versions shipped.
 
 Both connection paths (steps 2–3) go through OAuth — no token to copy/paste. The manual token used
 in step 4 exists specifically for non-interactive automation (the hook script has no browser to
@@ -103,32 +104,34 @@ dropped into a host's per-message context hook — e.g. a Claude Code `UserPromp
 
 The installer for exactly that hook is idempotent, safe to re-run, and merges into
 `~/.claude/settings.json` rather than overwriting it. Everything it needs lives in `hooks/`, and
-`core-mcp` serves it by redirecting to GitHub rather than shipping it in the image, so an install
-never depends on what a container happens to have on disk. The URLs stay flat at the root even
-though the files sit in a subdirectory — already-installed hooks fetch their own updates through
-them:
+`core-mcp` serves it by redirecting to GitHub's release CDN (two rolling releases, `hooks-latest`
+and `hooks-payload`, kept in sync with `hooks/` by `.github/workflows/release-hooks.yml`) rather
+than shipping it in the image or serving raw.githubusercontent.com directly (which rate-limits
+under load), so an install never depends on what a container happens to have on disk. The URLs stay
+flat at the root even though the files sit in a subdirectory — already-installed hooks fetch their
+own updates through them:
 
 | `hooks/` | served at | role |
 | --- | --- | --- |
-| `install-hook.sh` / `install-hook.ps1` | `GET /install-hook.{sh,ps1}` | per-platform bootstrap: find a Python 3.8+, download the installer, hand off |
-| `install_hook.py` | `GET /install_hook.py` | the actual installer, identical on every platform |
-| `continuum_context_inject.py` | `GET /continuum_context_inject.py` | the `UserPromptSubmit` hook |
-| `continuum_session_capture.py` | `GET /continuum_session_capture.py` | the `SessionEnd` hook |
-| `continuum_self_update.py` | `GET /continuum_self_update.py` | the background updater |
-| `uninstall-hook.sh` / `.ps1` / `uninstall_hook.py` | `GET /uninstall-hook.{sh,ps1}`, `/uninstall_hook.py` | the reverse, no token needed |
+| `install_hook.js` | `GET /install_hook.js` | the installer, run directly via `curl\|node` / `irm\|node` |
+| `continuum_context_inject.js` | `GET /continuum_context_inject.js` | the `UserPromptSubmit` hook |
+| `continuum_session_capture.js` | `GET /continuum_session_capture.js` | the `SessionEnd` hook |
+| `continuum_self_update.js` | `GET /continuum_self_update.js` | the background updater |
+| `uninstall_hook.js` | `GET /uninstall_hook.js` | the reverse, no token needed |
 
-Everything below the bootstrap is **stdlib Python with no shell**, which is what makes one
-implementation cover Linux, macOS and Windows: no bash, no `curl`, no shebang (`settings.json` gets
-`"<abs python> <abs hook>.py"`, resolved at install time and pinned past any active virtualenv),
-and stdio forced to UTF-8 so a legacy Windows codepage can't mangle a transcript. Every failure
-path — no token, dead network, unparseable stdin, timeout — exits 0 silently, so the hook can never
-block a prompt.
+Everything is **plain Node with no shell and no dependencies** (built-in `fetch`, so Node 18+),
+which is what makes one implementation cover Linux, macOS and Windows: no bash, no `curl`, no
+interpreter-name guessing (`settings.json` gets `"<abs node> <abs hook>.js"`, resolved at install
+time via `process.execPath`). Every failure path — no token, dead network, unparseable stdin,
+timeout — exits 0 silently, so the hook can never block a prompt. Re-running the installer also
+migrates cleanly off the older Python-based hooks this project shipped before, removing the old
+`.py` files and `settings.json` entries rather than running both side by side.
 
 The hooks keep themselves current. At most once every `CONTINUUM_UPDATE_INTERVAL_HOURS` (default
-24) the context hook spawns `continuum_self_update.py` **detached, after it has already written its
+24) the context hook spawns `continuum_self_update.js` **detached, after it has already written its
 output**, and exits without waiting — nothing about the update is ever in the path of a prompt. The
 updater SHA-256s each installed hook against the published copy and atomically replaces only what
-drifted, itself included; a payload that doesn't `compile()` as Python is discarded rather than
+drifted, itself included; a payload that fails to parse as JS (`vm.Script`) is discarded rather than
 written, so a 404 page or a truncated download can't brick the hook. Disable with
 `touch ~/.continuum/no-auto-update`, or run the updater by hand to force a check.
 

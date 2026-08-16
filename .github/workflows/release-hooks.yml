@@ -5,12 +5,16 @@ name: Release hook scripts
 # (release-assets.githubusercontent.com) instead of raw.githubusercontent.com,
 # which rate-limits and 403s under load. Both releases always track main.
 #
-#   hooks-latest  — install-hook/uninstall-hook .sh + .ps1 bootstraps: the only
-#                   files a person is ever meant to look at or run by hand.
-#   hooks-payload — the continuum_*.py / install_hook.py / uninstall_hook.py
-#                   implementation, fetched silently by the bootstraps and the
-#                   background updater. Kept off hooks-latest so that release
-#                   page shows just the script, not its Python internals.
+#   hooks-latest  — install_hook.js / uninstall_hook.js: the only files a
+#                   person is ever meant to look at or run by hand (curl|node
+#                   / irm|node).
+#   hooks-payload — the continuum_*.js implementation those two fetch
+#                   silently, plus what the background updater re-checks
+#                   daily. Kept off hooks-latest so that release page shows
+#                   just the script, not its internals.
+#
+# All Node now — there's no separate Python runtime to bootstrap into, so
+# unlike the old .sh/.ps1 pair this needs no per-platform variants.
 
 on:
   push:
@@ -37,21 +41,19 @@ jobs:
           if ! gh release view hooks-latest >/dev/null 2>&1; then
             gh release create hooks-latest \
               --title "Hook scripts (latest)" \
-              --notes "Install/uninstall bootstraps for Continuum's Claude Code hooks, tracking the tip of main. Source: hooks/ in this repo."
+              --notes "Install/uninstall entrypoints for Continuum's Claude Code hooks, tracking the tip of main. Requires Node 18+. Source: hooks/ in this repo."
           fi
           gh release upload hooks-latest \
-            hooks/install-hook.sh hooks/install-hook.ps1 \
-            hooks/uninstall-hook.sh hooks/uninstall-hook.ps1 \
+            hooks/install_hook.js hooks/uninstall_hook.js \
             --clobber
 
           if ! gh release view hooks-payload >/dev/null 2>&1; then
             gh release create hooks-payload \
               --title "Hook payload (latest)" \
-              --notes "Python implementation fetched by the hooks-latest bootstraps and the background updater — not meant to be run by hand. Source: hooks/ in this repo." \
+              --notes "Implementation fetched by the hooks-latest entrypoints and the background updater — not meant to be run by hand. Source: hooks/ in this repo." \
               --prerelease
           fi
           gh release upload hooks-payload \
-            hooks/install_hook.py hooks/uninstall_hook.py \
-            hooks/continuum_context_inject.py hooks/continuum_session_capture.py \
-            hooks/continuum_self_update.py \
+            hooks/continuum_context_inject.js hooks/continuum_session_capture.js \
+            hooks/continuum_self_update.js \
             --clobber

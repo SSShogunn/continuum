@@ -37,8 +37,8 @@ ICON_PATH = Path(__file__).parent / "icons" / "logo.svg"
 
 GITHUB_RELEASES_BASE = "https://github.com/SSShogunn/continuum/releases/download"
 # The bootstraps are the only files a person is ever meant to look at (they're
-# what curl|bash / irm|iex fetches by hand) — kept on their own release so that
-# page shows just the script, not the Python payload it silently downloads.
+# what curl|node / irm|node fetches by hand) — kept on their own release so that
+# page shows just the script, not the payload it silently downloads.
 SCRIPT_RELEASE_BASE = os.environ.get(
     "CONTINUUM_SCRIPT_RELEASE_BASE", f"{GITHUB_RELEASES_BASE}/hooks-latest"
 ).rstrip("/")
@@ -46,18 +46,17 @@ PAYLOAD_RELEASE_BASE = os.environ.get(
     "CONTINUUM_PAYLOAD_RELEASE_BASE", f"{GITHUB_RELEASES_BASE}/hooks-payload"
 ).rstrip("/")
 
+# Node only, as of the rewrite off Python: install_hook.js/uninstall_hook.js
+# are run directly (curl|node / irm|node), the rest are fetched silently by
+# them and by the background updater.
 BOOTSTRAP_SCRIPTS = (
-    "install-hook.sh",
-    "install-hook.ps1",
-    "uninstall-hook.sh",
-    "uninstall-hook.ps1",
+    "install_hook.js",
+    "uninstall_hook.js",
 )
 PAYLOAD_SCRIPTS = (
-    "install_hook.py",
-    "uninstall_hook.py",
-    "continuum_context_inject.py",
-    "continuum_session_capture.py",
-    "continuum_self_update.py",
+    "continuum_context_inject.js",
+    "continuum_session_capture.js",
+    "continuum_self_update.js",
 )
 PUBLIC_SCRIPTS = BOOTSTRAP_SCRIPTS + PAYLOAD_SCRIPTS
 
