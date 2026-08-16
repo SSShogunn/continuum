@@ -74,18 +74,11 @@ function cleanSettings() {
 
 function main() {
   removeFiles();
-  const removed = cleanSettings();
+  cleanSettings();
   console.log("");
-  if (removed === null) {
-    console.log("no settings.json to clean up");
-  } else {
-    console.log(removed ? "settings.json entries removed" : "no matching settings.json entries found");
-  }
-  console.log(
-    "Continuum hooks uninstalled: context injection, session capture, local token, " +
-      "and workspace state removed."
-  );
-  console.log("Run /hooks in Claude Code (or restart it) to pick up the change.");
+  console.log("Continuum has been removed, along with your saved token on this machine.");
+  console.log("Your memories are untouched — sign in to the dashboard anytime.");
+  console.log("Restart Claude Code to finish.");
 }
 
 main();

@@ -116,9 +116,8 @@ function fail(message) {
 function checkNode() {
   if (typeof fetch === "undefined") {
     fail(
-      "Continuum's Claude Code hooks need Node 18 or newer (for built-in fetch), and the " +
-        "running Node doesn't have it. Install a current Node from https://nodejs.org/ " +
-        "or 'nvm install --lts', then re-run this command."
+      "Continuum needs Node 18 or newer. Install it from https://nodejs.org/ " +
+        "(or run 'nvm install --lts'), then try again."
     );
   }
 }
@@ -212,64 +211,54 @@ async function main() {
   const token = await readToken();
 
   const names = HOOKS.map(([, , name]) => name).concat([UPDATER[1]]);
-  startStep(`downloading hook scripts (0/${names.length})`);
+  startStep(`downloading (0/${names.length})`);
   let done = 0;
   const sources = {};
   await Promise.all(
     names.map(async (name) => {
       sources[name] = await download(name);
       done += 1;
-      setLabel(`downloading hook scripts (${done}/${names.length})`);
+      setLabel(`downloading (${done}/${names.length})`);
     })
   );
   const bytes = names.reduce((total, name) => total + sources[name].length, 0);
   endStep(`${Math.round(bytes / 1024)} KB`);
 
-  startStep("writing hooks and token");
+  startStep("installing");
   fs.mkdirSync(STATE_DIR, { recursive: true });
   fs.mkdirSync(HOOKS_DIR, { recursive: true });
   writePrivate(TOKEN_PATH, token);
 
   const settings = loadSettings();
   const hooks = settings.hooks || (settings.hooks = {});
-  const results = [];
   const node = process.execPath;
 
   for (const [event, stem, name, timeout] of HOOKS) {
     const hookPath = path.join(HOOKS_DIR, stem + ".js");
     fs.writeFileSync(hookPath, sources[name]);
     const command = `"${node}" "${hookPath}"`;
-    results.push([event, register(hooks, event, stem, command, timeout)]);
+    register(hooks, event, stem, command, timeout);
     removeLegacy(stem);
   }
 
   const updaterPath = path.join(HOOKS_DIR, UPDATER[0] + ".js");
   fs.writeFileSync(updaterPath, sources[UPDATER[1]]);
   removeLegacy(UPDATER[0]);
-  endStep(HOOKS_DIR);
+  endStep();
 
-  startStep("registering hooks in settings.json");
+  startStep("enabling in Claude Code");
   fs.mkdirSync(path.dirname(SETTINGS_PATH), { recursive: true });
   fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + "\n");
-  endStep(results.map(([, result]) => result).join(", "));
+  endStep();
 
-  const labels = {
-    UserPromptSubmit: "auto-context injection",
-    SessionEnd: "session capture (candidates queued for review in the dashboard)",
-  };
   console.log("");
-  console.log(`Continuum hooks installed, running under ${node}:`);
-  for (const [event, result] of results) {
-    console.log(`  ${event.padEnd(16)} -> ${labels[event]} [${result}]`);
-  }
+  console.log("Continuum is set up.");
   console.log("");
-  console.log("The hooks keep themselves current: once a day the context hook spawns");
-  console.log(`${updaterPath} in the background, which replaces any hook`);
-  console.log("whose SHA-256 no longer matches the published copy.");
+  console.log("  Auto-context     relevant memory added to every message");
+  console.log("  Session capture  suggestions saved for review in the dashboard");
   console.log("");
-  console.log(`Disable session capture only:  create the file ${path.join(STATE_DIR, "capture-disabled")}`);
-  console.log(`Disable auto-update:           create the file ${path.join(STATE_DIR, "no-auto-update")}`);
-  console.log("Run /hooks in Claude Code (or restart it) to pick up the change.");
+  console.log("Updates install themselves in the background.");
+  console.log("Restart Claude Code to finish. You can turn these off in the dashboard.");
 }
 
 main().catch((exc) => {
