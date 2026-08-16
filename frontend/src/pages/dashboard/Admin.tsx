@@ -4,6 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Page, Section } from "@/components/page";
 import { EmptyState, StatGridSkeleton } from "@/components/states";
 import { Badge } from "@/components/ui/badge";
+import { relativeTime } from "@/lib/utils";
 import { AlertTriangle, Gauge, Percent, ShieldCheck, Users } from "lucide-react";
 
 interface User {
@@ -19,6 +20,15 @@ interface ToolStat {
   calls: number;
   errors: number;
   avg_duration_ms: number;
+}
+
+interface ActivityRow {
+  tool: string;
+  status: string;
+  duration_ms: number;
+  timestamp: string;
+  arguments: string | null;
+  error: string | null;
 }
 
 interface Stats {
@@ -63,6 +73,7 @@ export default function AdminPage() {
   const api = useApiClient();
   const [users, setUsers] = useState<User[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [recentErrors, setRecentErrors] = useState<ActivityRow[]>([]);
   const [forbidden, setForbidden] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -79,6 +90,11 @@ export default function AdminPage() {
         }
         setLoading(false);
       });
+
+    api
+      .get<{ activity: ActivityRow[] }>("/api/admin/activity?limit=8&status=error")
+      .then((data) => setRecentErrors(data.activity ?? []))
+      .catch(() => {});
   }, [api]);
 
   return (
@@ -148,6 +164,32 @@ export default function AdminPage() {
               )}
             </>
           )}
+
+          <Section title="Recent errors">
+            <Card surface="chrome">
+              <CardContent className="p-0">
+                {recentErrors.length === 0 ? (
+                  <p className="text-muted-foreground text-sm p-4">No recent errors.</p>
+                ) : (
+                  recentErrors.map((e, i) => (
+                    <div
+                      key={`${e.timestamp}-${i}`}
+                      className="relative flex items-center gap-3 pl-4 pr-3 py-2.5 border-b last:border-b-0"
+                    >
+                      <span className="absolute left-0 top-0 bottom-0 w-0.5 bg-chart-4" />
+                      <span className="font-mono text-xs truncate flex-1 min-w-0">{e.tool}</span>
+                      <span className="text-xs text-muted-foreground truncate max-w-[40%]">
+                        {e.error ?? "—"}
+                      </span>
+                      <span className="text-xs text-muted-foreground shrink-0">
+                        {relativeTime(e.timestamp)}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          </Section>
 
           <Section title={`Users (${users.length})`}>
             {users.length === 0 ? (

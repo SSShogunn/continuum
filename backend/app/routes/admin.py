@@ -28,3 +28,22 @@ async def list_users(_: dict = Depends(require_admin)):
 @router.get("/stats")
 async def get_stats(_: dict = Depends(require_admin)):
     return await core_client.get("/internal/stats", "Failed to fetch stats from core")
+
+
+@router.get("/activity")
+async def get_activity(
+    limit: int = 50,
+    tool: str | None = None,
+    status: str | None = None,
+    _: dict = Depends(require_admin),
+):
+    params: dict = {"limit": limit}
+    if tool:
+        params["tool"] = tool
+    if status:
+        params["status"] = status
+    return await core_client.get(
+        "/internal/activity",
+        "Failed to fetch activity from core",
+        params=params,
+    )
