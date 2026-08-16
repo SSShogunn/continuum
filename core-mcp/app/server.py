@@ -35,9 +35,9 @@ load_dotenv()
 
 ICON_PATH = Path(__file__).parent / "icons" / "logo.svg"
 
-SCRIPT_RAW_BASE = os.environ.get(
-    "CONTINUUM_SCRIPT_RAW_BASE",
-    "https://raw.githubusercontent.com/SSShogunn/continuum/main/hooks",
+SCRIPT_RELEASE_BASE = os.environ.get(
+    "CONTINUUM_SCRIPT_RELEASE_BASE",
+    "https://github.com/SSShogunn/continuum/releases/download/hooks-latest",
 ).rstrip("/")
 PUBLIC_SCRIPTS = (
     "install-hook.sh",
@@ -240,10 +240,13 @@ async def serve_app_icon(request: Request) -> Response:
 
 def _script_route(name: str):
     """Public, and a redirect rather than a file read: the scripts live in the
-    repo's `hooks/` directory and are served straight off GitHub, so nothing
-    about the install flow depends on what this container happens to have on
-    disk. These URLs stay flat at the root even though the files sit in a
-    subdirectory — already-installed hooks fetch their own updates through them.
+    repo's `hooks/` directory and are published as assets on the rolling
+    `hooks-latest` GitHub release (via .github/workflows/release-hooks.yml),
+    so nothing about the install flow depends on what this container happens
+    to have on disk, and downloads go through GitHub's release CDN rather
+    than raw.githubusercontent.com, which rate-limits under load. These URLs
+    stay flat at the root even though the files sit in a subdirectory —
+    already-installed hooks fetch their own updates through them.
     `install-hook.sh`
     and `install-hook.ps1` are thin per-platform bootstraps that find a Python
     and hand off to `install_hook.py`, which is the real installer everywhere;
@@ -252,7 +255,7 @@ def _script_route(name: str):
     Connections page) is secret, and it never travels through here."""
 
     async def serve_script(request: Request) -> Response:
-        return RedirectResponse(f"{SCRIPT_RAW_BASE}/{name}", status_code=302)
+        return RedirectResponse(f"{SCRIPT_RELEASE_BASE}/{name}", status_code=302)
 
     serve_script.__name__ = f"serve_{name.replace('-', '_').replace('.', '_')}"
     return serve_script
