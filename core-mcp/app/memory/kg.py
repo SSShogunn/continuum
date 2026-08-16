@@ -2,6 +2,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
+from .. import auth
 from ..infra import pg
 from ..infra import redis as redis_infra
 from . import edges as edge_resolver
@@ -98,46 +99,47 @@ async def extract(owner: str, name: str, text: str, reference_time_iso: str) -> 
     )
 
 
-async def get_graph_stats(owner: str) -> dict:
+async def get_graph_stats(owners: list[str]) -> dict:
     async with pg.pool().acquire() as conn:
         node_count = await conn.fetchval(
-            "SELECT COUNT(*) FROM entity_node WHERE owner = $1", owner
+            "SELECT COUNT(*) FROM entity_node WHERE owner = ANY($1::text[])", owners
         )
         edge_count = await conn.fetchval(
-            "SELECT COUNT(*) FROM entity_edge WHERE owner = $1 AND expired_at IS NULL",
-            owner,
+            "SELECT COUNT(*) FROM entity_edge WHERE owner = ANY($1::text[]) AND expired_at IS NULL",
+            owners,
         )
         by_type = await conn.fetch(
             """
             SELECT type, COUNT(*) AS count
             FROM entity_node
-            WHERE owner = $1
+            WHERE owner = ANY($1::text[])
             GROUP BY type
             ORDER BY count DESC
             """,
-            owner,
+            owners,
         )
         top_entities = await conn.fetch(
             """
             SELECT n.name, n.type, COUNT(*) AS degree
             FROM entity_node n
-            JOIN entity_edge e ON (e.source_id = n.id OR e.target_id = n.id)
-            WHERE n.owner = $1 AND e.expired_at IS NULL
+            JOIN entity_edge e
+              ON e.owner = n.owner AND (e.source_id = n.id OR e.target_id = n.id)
+            WHERE n.owner = ANY($1::text[]) AND e.expired_at IS NULL
             GROUP BY n.id, n.name, n.type
             ORDER BY degree DESC
             LIMIT 10
             """,
-            owner,
+            owners,
         )
         superseded = await conn.fetch(
             """
             SELECT e.fact, e.predicate, e.episode_name, e.valid_at, e.invalid_at, e.expired_at
             FROM entity_edge e
-            WHERE e.owner = $1 AND e.expired_at IS NOT NULL
+            WHERE e.owner = ANY($1::text[]) AND e.expired_at IS NOT NULL
             ORDER BY e.expired_at DESC
             LIMIT 20
             """,
-            owner,
+            owners,
         )
     return {
         "node_count": node_count,
@@ -179,35 +181,43 @@ async def delete_account(clerk_id: str) -> None:
             )
 
 
-async def graph_for_owner(owner: str) -> dict:
+async def graph_for_owners(owners: list[str]) -> dict:
     async with pg.pool().acquire() as conn:
         edge_rows = await conn.fetch(
             """
-            SELECT e.id, e.source_id, e.target_id, e.predicate, e.fact,
+            SELECT e.id, e.owner, e.source_id, e.target_id, e.predicate, e.fact,
                    e.episode_name, e.valid_at
             FROM entity_edge e
-            WHERE e.owner = $1 AND e.expired_at IS NULL
+            WHERE e.owner = ANY($1::text[]) AND e.expired_at IS NULL
             ORDER BY e.created_at
             """,
-            owner,
+            owners,
         )
         node_rows = await conn.fetch(
             """
-            SELECT DISTINCT n.id, n.name, n.type, n.summary
+            SELECT DISTINCT n.id, n.owner, n.name, n.type, n.summary
             FROM entity_node n
-            JOIN entity_edge e ON (e.source_id = n.id OR e.target_id = n.id)
-            WHERE n.owner = $1 AND e.expired_at IS NULL
+            JOIN entity_edge e
+              ON e.owner = n.owner AND (e.source_id = n.id OR e.target_id = n.id)
+            WHERE n.owner = ANY($1::text[]) AND e.expired_at IS NULL
             """,
-            owner,
+            owners,
         )
     return {
         "nodes": [
-            {"id": r["id"], "name": r["name"], "type": r["type"], "summary": r["summary"]}
+            {
+                "id": r["id"],
+                "workspace": auth.workspace_of(r["owner"]),
+                "name": r["name"],
+                "type": r["type"],
+                "summary": r["summary"],
+            }
             for r in node_rows
         ],
         "edges": [
             {
                 "id": r["id"],
+                "workspace": auth.workspace_of(r["owner"]),
                 "source": r["source_id"],
                 "target": r["target_id"],
                 "predicate": r["predicate"],

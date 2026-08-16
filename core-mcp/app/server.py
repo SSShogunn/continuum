@@ -264,18 +264,28 @@ async def internal_memory(request: Request) -> Response:
     })
 
 
+async def _graph_owners(
+    clerk_id: str, workspace: str, workspaces: list[str] | None = None
+) -> list[str]:
+    if workspace != auth.ALL_WORKSPACES:
+        return [auth.compose_owner(clerk_id, workspace)]
+    names = workspaces if workspaces is not None else await memory.list_workspaces(clerk_id)
+    return [auth.compose_owner(clerk_id, name) for name in names]
+
+
 @mcp.custom_route("/internal/graph", methods=["GET"])
 async def internal_graph(request: Request) -> Response:
     if not _check_internal_secret(request):
         return Response("Forbidden", status_code=403)
     clerk_id = request.query_params.get("clerk_id", "")
     workspace = request.query_params.get("workspace", "default")
-    owner = auth.compose_owner(clerk_id, workspace)
+    workspaces = await memory.list_workspaces(clerk_id)
+    owners = await _graph_owners(clerk_id, workspace, workspaces)
 
-    data = await kg.graph_for_owner(owner)
+    data = await kg.graph_for_owners(owners)
     return JSONResponse({
         "workspace": workspace,
-        "workspaces": await memory.list_workspaces(clerk_id),
+        "workspaces": workspaces,
         "nodes": data["nodes"],
         "edges": data["edges"],
     })
@@ -592,8 +602,8 @@ async def internal_graph_stats(request: Request) -> Response:
         return Response("Forbidden", status_code=403)
     clerk_id = request.query_params.get("clerk_id", "")
     workspace = request.query_params.get("workspace", "default")
-    owner = auth.compose_owner(clerk_id, workspace)
-    stats = await kg.get_graph_stats(owner)
+    owners = await _graph_owners(clerk_id, workspace)
+    stats = await kg.get_graph_stats(owners)
     return JSONResponse(stats)
 
 
@@ -608,7 +618,7 @@ async def internal_account_export(request: Request) -> Response:
         owner = auth.compose_owner(clerk_id, workspace)
         by_workspace[workspace] = {
             "memories": await memory.list_full(owner=owner),
-            "graph": await kg.graph_for_owner(owner),
+            "graph": await kg.graph_for_owners([owner]),
         }
     return JSONResponse({
         "format": "continuum-account-export",

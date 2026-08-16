@@ -62,8 +62,16 @@ def current_owner() -> str | None:
     return token.client_id if token else None
 
 
+ALL_WORKSPACES = "__all__"
+
+
 def compose_owner(clerk_id: str, workspace: str = "default") -> str:
     return f"{clerk_id}:{workspace}"
+
+
+def workspace_of(owner: str) -> str:
+    _, _, workspace = owner.partition(":")
+    return workspace or "default"
 
 
 def scoped_owner(workspace: str = "default") -> str:

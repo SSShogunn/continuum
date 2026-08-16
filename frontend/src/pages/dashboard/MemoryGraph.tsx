@@ -5,6 +5,7 @@ import {
   ArrowRight,
   Locate,
   Maximize2,
+  Layers,
   PanelLeft,
   RotateCcw,
   Search,
@@ -36,8 +37,11 @@ import {
   entityColor,
 } from "@/components/graph/entity-palette";
 
+const ALL_WORKSPACES = "__all__";
+
 interface ApiNode {
   id: number;
+  workspace?: string;
   name: string;
   type: string;
   summary: string;
@@ -74,6 +78,7 @@ export default function MemoryGraphPage() {
 
   const [nodes, setNodes] = useState<ApiNode[]>([]);
   const [edges, setEdges] = useState<ApiEdge[]>([]);
+  const [allWorkspaces, setAllWorkspaces] = useState(false);
   const [loadedWorkspace, setLoadedWorkspace] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -88,14 +93,16 @@ export default function MemoryGraphPage() {
   const graphHandle = useRef<ForceGraphHandle | null>(null);
   const railListRef = useRef<HTMLDivElement | null>(null);
 
-  const loading = loadedWorkspace !== workspace && error === null;
+  const scope = allWorkspaces ? ALL_WORKSPACES : workspace;
+  const scopeLabel = allWorkspaces ? "all workspaces" : `"${workspace}"`;
+  const loading = loadedWorkspace !== scope && error === null;
 
   useEffect(() => {
     let cancelled = false;
     setError(null);
     api
       .get<{ nodes: ApiNode[]; edges: ApiEdge[]; workspaces: string[] }>(
-        `/api/memory/graph?workspace=${encodeURIComponent(workspace)}`
+        `/api/memory/graph?workspace=${encodeURIComponent(scope)}`
       )
       .then((data) => {
         if (cancelled) return;
@@ -103,7 +110,7 @@ export default function MemoryGraphPage() {
         setEdges(data.edges ?? []);
         setWorkspaces(data.workspaces ?? ["default"]);
         setSelectedId(null);
-        setLoadedWorkspace(workspace);
+        setLoadedWorkspace(scope);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -112,7 +119,7 @@ export default function MemoryGraphPage() {
     return () => {
       cancelled = true;
     };
-  }, [workspace, setWorkspaces, api]);
+  }, [scope, setWorkspaces, api]);
 
   const typeCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -262,13 +269,24 @@ export default function MemoryGraphPage() {
       title="Memory graph"
       description={
         loading
-          ? `Loading "${workspace}"…`
-          : `${visible.graphNodes.length} entities · ${visible.graphEdges.length} relations in "${workspace}"`
+          ? `Loading ${scopeLabel}…`
+          : `${visible.graphNodes.length} entities · ${visible.graphEdges.length} relations in ${scopeLabel}`
       }
       icon={Share2}
       fill
       bleed
       actions={
+        <>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="gap-1.5 text-muted-foreground"
+          aria-pressed={allWorkspaces}
+          onClick={() => setAllWorkspaces((v) => !v)}
+        >
+          <Layers className={cn(allWorkspaces && "text-primary")} />
+          <span className="hidden sm:inline">All workspaces</span>
+        </Button>
         <Button
           variant="ghost"
           size="sm"
@@ -279,6 +297,7 @@ export default function MemoryGraphPage() {
           <PanelLeft className={cn("transition-transform", !railOpen && "rotate-180")} />
           <span className="hidden sm:inline">Index</span>
         </Button>
+        </>
       }
     >
       <div className="relative flex min-h-0 flex-1">
@@ -409,6 +428,11 @@ export default function MemoryGraphPage() {
                           style={{ backgroundColor: entityColor(n.type, resolvedTheme) }}
                         />
                         <span className="min-w-0 flex-1 truncate font-mono text-xs">{n.label}</span>
+                        {allWorkspaces && (
+                          <span className="shrink-0 truncate font-mono text-[10px] text-muted-foreground/70">
+                            {nodeById.get(n.id)?.workspace}
+                          </span>
+                        )}
                         <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
                           {n.degree}
                         </span>
@@ -539,6 +563,11 @@ export default function MemoryGraphPage() {
                     <Badge variant="secondary" className="font-mono text-[10px]">
                       {selectedNode.type}
                     </Badge>
+                    {allWorkspaces && selectedNode.workspace && (
+                      <Badge variant="outline" className="font-mono text-[10px]">
+                        {selectedNode.workspace}
+                      </Badge>
+                    )}
                     <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
                       {selectedRelations.length} relation
                       {selectedRelations.length === 1 ? "" : "s"}
