@@ -35,21 +35,31 @@ load_dotenv()
 
 ICON_PATH = Path(__file__).parent / "icons" / "logo.svg"
 
+GITHUB_RELEASES_BASE = "https://github.com/SSShogunn/continuum/releases/download"
+# The bootstraps are the only files a person is ever meant to look at (they're
+# what curl|bash / irm|iex fetches by hand) — kept on their own release so that
+# page shows just the script, not the Python payload it silently downloads.
 SCRIPT_RELEASE_BASE = os.environ.get(
-    "CONTINUUM_SCRIPT_RELEASE_BASE",
-    "https://github.com/SSShogunn/continuum/releases/download/hooks-latest",
+    "CONTINUUM_SCRIPT_RELEASE_BASE", f"{GITHUB_RELEASES_BASE}/hooks-latest"
 ).rstrip("/")
-PUBLIC_SCRIPTS = (
+PAYLOAD_RELEASE_BASE = os.environ.get(
+    "CONTINUUM_PAYLOAD_RELEASE_BASE", f"{GITHUB_RELEASES_BASE}/hooks-payload"
+).rstrip("/")
+
+BOOTSTRAP_SCRIPTS = (
     "install-hook.sh",
     "install-hook.ps1",
     "uninstall-hook.sh",
     "uninstall-hook.ps1",
+)
+PAYLOAD_SCRIPTS = (
     "install_hook.py",
     "uninstall_hook.py",
     "continuum_context_inject.py",
     "continuum_session_capture.py",
     "continuum_self_update.py",
 )
+PUBLIC_SCRIPTS = BOOTSTRAP_SCRIPTS + PAYLOAD_SCRIPTS
 
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -240,22 +250,23 @@ async def serve_app_icon(request: Request) -> Response:
 
 def _script_route(name: str):
     """Public, and a redirect rather than a file read: the scripts live in the
-    repo's `hooks/` directory and are published as assets on the rolling
-    `hooks-latest` GitHub release (via .github/workflows/release-hooks.yml),
-    so nothing about the install flow depends on what this container happens
-    to have on disk, and downloads go through GitHub's release CDN rather
-    than raw.githubusercontent.com, which rate-limits under load. These URLs
-    stay flat at the root even though the files sit in a subdirectory —
-    already-installed hooks fetch their own updates through them.
-    `install-hook.sh`
-    and `install-hook.ps1` are thin per-platform bootstraps that find a Python
-    and hand off to `install_hook.py`, which is the real installer everywhere;
-    `install_hook.py` and the background updater in turn pull the `continuum_*`
-    hook scripts through these same URLs. Only the token (from the dashboard's
-    Connections page) is secret, and it never travels through here."""
+    repo's `hooks/` directory and are published as assets on two rolling
+    GitHub releases (via .github/workflows/release-hooks.yml) — `hooks-latest`
+    for the `install-hook`/`uninstall-hook` bootstraps a person actually runs,
+    `hooks-payload` for the `continuum_*`/`install_hook.py`/`uninstall_hook.py`
+    Python files those bootstraps and the background updater fetch silently.
+    Splitting them keeps the release page a person lands on limited to the
+    script they were told to run, not its implementation. Nothing about the
+    install flow depends on what this container happens to have on disk, and
+    downloads go through GitHub's release CDN rather than raw.githubusercontent.com,
+    which rate-limits under load. These URLs stay flat at the root even though
+    the files sit in a subdirectory — already-installed hooks fetch their own
+    updates through them. Only the token (from the dashboard's Connections
+    page) is secret, and it never travels through here."""
+    base = SCRIPT_RELEASE_BASE if name in BOOTSTRAP_SCRIPTS else PAYLOAD_RELEASE_BASE
 
     async def serve_script(request: Request) -> Response:
-        return RedirectResponse(f"{SCRIPT_RELEASE_BASE}/{name}", status_code=302)
+        return RedirectResponse(f"{base}/{name}", status_code=302)
 
     serve_script.__name__ = f"serve_{name.replace('-', '_').replace('.', '_')}"
     return serve_script
