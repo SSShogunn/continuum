@@ -17,6 +17,8 @@ export default defineConfig({
     },
   },
   server: {
-    allowedHosts:["continuum.sshogunn.org"]
+    allowedHosts: process.env.VITE_ALLOWED_HOSTS
+      ? process.env.VITE_ALLOWED_HOSTS.split(',').map((h) => h.trim())
+      : true,
   }
 })
