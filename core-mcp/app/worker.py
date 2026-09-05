@@ -18,7 +18,7 @@ async def build_graph_job(ctx, owner: str, name: str, text: str, reference_time_
 
 async def capture_session_job(ctx, owner: str, session_id: str, transcript: str) -> None:
     saved = await capture.extract_candidates(owner, session_id, transcript)
-    logger.info("Session capture: %d candidate(s) queued for owner=%s", saved, owner)
+    logger.info("Session capture: saved %d memory entries for owner=%s", saved, owner)
 
 
 async def prune_request_logs_job(ctx) -> None:

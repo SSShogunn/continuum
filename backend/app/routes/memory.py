@@ -17,12 +17,6 @@ class RecallRequest(BaseModel):
     workspace: str = "default"
 
 
-class CandidateResolveRequest(BaseModel):
-    id: int
-    accept: bool
-    workspace: str = "default"
-
-
 class SaveRequest(BaseModel):
     name: str
     type: str = "note"
@@ -73,28 +67,6 @@ async def save_memory(body: SaveRequest, user: dict = Depends(get_current_user))
     return await core_client.post(
         "/internal/memory/save",
         "Failed to save memory",
-        json={**body.model_dump(), "clerk_id": user["sub"]},
-        timeout=30.0,
-        passthrough_status=True,
-    )
-
-
-@router.get("/candidates")
-async def get_session_candidates(workspace: str = "default", user: dict = Depends(get_current_user)):
-    return await core_client.get(
-        "/internal/session/candidates",
-        "Failed to fetch session candidates",
-        params={"clerk_id": user["sub"], "workspace": workspace},
-    )
-
-
-@router.post("/candidates/resolve")
-async def resolve_session_candidate(
-    body: CandidateResolveRequest, user: dict = Depends(get_current_user)
-):
-    return await core_client.post(
-        "/internal/session/candidates/resolve",
-        "Failed to resolve candidate",
         json={**body.model_dump(), "clerk_id": user["sub"]},
         timeout=30.0,
         passthrough_status=True,
