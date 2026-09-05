@@ -35,6 +35,7 @@ jobs:
       - name: Publish hooks-latest and hooks-payload releases
         env:
           GH_TOKEN: ${{ github.token }}
+          HOOK_VERSION: ${{ github.sha }}
         run: |
           set -euo pipefail
 
@@ -53,7 +54,20 @@ jobs:
               --notes "Implementation fetched by the hooks-latest entrypoints and the background updater — not meant to be run by hand. Source: hooks/ in this repo." \
               --prerelease
           fi
+
+          # continuum_context_inject.js/continuum_session_capture.js report a
+          # HOOK_VERSION on every ping so core-mcp can tell an installed hook
+          # apart from a stale one. The committed source keeps a placeholder —
+          # only the uploaded copy gets the real commit SHA, so nobody hand-bumps
+          # a version number on release. version.json lets the server look up
+          # the same value from the same release, so both sides always agree.
+          staging=$(mktemp -d)
+          cp hooks/continuum_context_inject.js hooks/continuum_session_capture.js hooks/continuum_self_update.js "$staging/"
+          sed -i "s/__HOOK_VERSION__/$HOOK_VERSION/" \
+            "$staging/continuum_context_inject.js" "$staging/continuum_session_capture.js"
+          printf '{"version": "%s"}' "$HOOK_VERSION" > "$staging/version.json"
+
           gh release upload hooks-payload \
-            hooks/continuum_context_inject.js hooks/continuum_session_capture.js \
-            hooks/continuum_self_update.js \
+            "$staging/continuum_context_inject.js" "$staging/continuum_session_capture.js" \
+            "$staging/continuum_self_update.js" "$staging/version.json" \
             --clobber

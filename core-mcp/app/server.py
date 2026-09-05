@@ -77,12 +77,38 @@ logger = logging.getLogger("continuum")
 
 
 REVOCATION_POLL_SECONDS = int(os.environ.get("CONTINUUM_REVOCATION_POLL_SECONDS", "30"))
+HOOK_VERSION_POLL_SECONDS = int(os.environ.get("CONTINUUM_HOOK_VERSION_POLL_SECONDS", "300"))
+HOOK_SEEN_TTL_SECONDS = 35 * 24 * 3600
+
+# Set by _poll_latest_hook_version(). None until the first successful poll —
+# _hook_nudge() treats that as "don't know yet" and stays quiet rather than
+# telling everyone they're outdated.
+_latest_hook_version: str | None = None
 
 
 async def _poll_revoked_jtis() -> None:
     while True:
         await auth.refresh_revoked_jtis()
         await asyncio.sleep(REVOCATION_POLL_SECONDS)
+
+
+async def _poll_latest_hook_version() -> None:
+    """version.json is stamped with the release commit SHA by
+    .github/workflows/release-hooks.yml onto the same hooks-payload release the
+    hook scripts themselves are served from — so this and what a hook reports
+    in X-Continuum-Hook-Version always come from the same source, with nobody
+    hand-maintaining a version number anywhere."""
+    global _latest_hook_version
+    url = f"{PAYLOAD_RELEASE_BASE}/version.json"
+    while True:
+        try:
+            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                _latest_hook_version = response.json().get("version")
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("Failed to refresh latest hook version: %r", exc)
+        await asyncio.sleep(HOOK_VERSION_POLL_SECONDS)
 
 
 @asynccontextmanager
@@ -94,12 +120,16 @@ async def lifespan(server: "FastMCP"):
     await memory.start()
     await auth.refresh_revoked_jtis()
     poll_task = asyncio.create_task(_poll_revoked_jtis())
+    hook_version_task = asyncio.create_task(_poll_latest_hook_version())
     try:
         yield {}
     finally:
         poll_task.cancel()
+        hook_version_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await poll_task
+        with contextlib.suppress(asyncio.CancelledError):
+            await hook_version_task
         await memory.stop()
         await db.stop()
         await redis_infra.stop()
@@ -219,6 +249,43 @@ def _check_internal_secret(request: Request) -> bool:
     return bool(secret) and request.headers.get("X-Internal-Secret") == secret
 
 
+async def _record_hook_ping(request: Request, clerk_id: str) -> None:
+    """Best-effort: a hook script that just proved it can reach us records the
+    version it's running, so `_hook_nudge` can tell an installed-but-outdated
+    hook apart from one that was never installed at all. Never raises — a
+    Redis hiccup here must not break the hook response it rides along with."""
+    version = request.headers.get("x-continuum-hook-version") or "unknown"
+    try:
+        await redis_infra.pool().set(f"hookseen:{clerk_id}", version, ex=HOOK_SEEN_TTL_SECONDS)
+    except Exception:
+        logger.exception("Failed to record hook ping for owner=%s", clerk_id)
+
+
+async def _hook_nudge(clerk_id: str) -> str:
+    """One line to append to memory_search/memory_list — the tools Continuum's
+    own instructions say get called at the start of every conversation — so a
+    user without a working hook eventually hears about it from the model
+    itself, without nagging on every single tool call."""
+    if not await memory.get_hook_context_enabled(clerk_id):
+        return ""
+    try:
+        seen = await redis_infra.pool().get(f"hookseen:{clerk_id}")
+    except Exception:
+        return ""
+    if seen is None:
+        return (
+            "\n\n[Continuum: no auto-context hook detected for this account. Tell the user they "
+            "can install one for automatic memory injection and session capture — instructions "
+            "are on the dashboard's Connections page.]"
+        )
+    if _latest_hook_version and seen.decode() != _latest_hook_version:
+        return (
+            "\n\n[Continuum: the installed hook is outdated. Tell the user to run /continuum-update "
+            "to refresh it.]"
+        )
+    return ""
+
+
 async def _json_body(request: Request) -> dict | None:
     try:
         body = await request.json()
@@ -329,6 +396,7 @@ async def hook_context(request: Request) -> Response:
     access_token = await _jwt_verifier.verify_token(authz[7:].strip())
     if access_token is None:
         return JSONResponse({"error": "Invalid or expired token"}, status_code=401)
+    await _record_hook_ping(request, access_token.client_id)
     if not await memory.get_hook_context_enabled(access_token.client_id):
         return JSONResponse({"context": None})
 
@@ -382,6 +450,7 @@ async def hook_session(request: Request) -> Response:
     access_token = await _jwt_verifier.verify_token(authz[7:].strip())
     if access_token is None:
         return JSONResponse({"error": "Invalid or expired token"}, status_code=401)
+    await _record_hook_ping(request, access_token.client_id)
     if not await memory.get_hook_context_enabled(access_token.client_id):
         return JSONResponse({"queued": False})
 
@@ -1056,13 +1125,14 @@ async def memory_search(query: str, top_k: int = 5, type: str | None = None, wor
         for entry in entries:
             merged.setdefault(entry["name"], {**entry, "workspace": name})
     results = sorted(merged.values(), key=lambda e: e["score"], reverse=True)[:top_k]
+    nudge = await _hook_nudge(auth.current_owner() or "")
     if not results:
-        return "No memory entries found."
+        return "No memory entries found." + nudge
     blocks = [
         f"## {r['name']} (workspace={r['workspace']}, type={r['type']}, recall={r['recall']}, score={r['score']:.3f})\n{r['description']}\n\n{r['content']}"
         for r in results
     ]
-    return "\n\n---\n\n".join(blocks)
+    return "\n\n---\n\n".join(blocks) + nudge
 
 
 @mcp.tool
@@ -1125,14 +1195,15 @@ async def memory_list(type: str | None = None, workspace: str = "default", inclu
         for entry in entries:
             merged.setdefault(entry["name"], {**entry, "workspace": name})
     entries = sorted(merged.values(), key=lambda e: e["updated_at"], reverse=True)
+    nudge = await _hook_nudge(auth.current_owner() or "")
     if not entries:
-        return "No memory entries found."
+        return "No memory entries found." + nudge
     return "\n".join(
         f"- [{e['workspace']}] {e['name']} [{e['type']}]: {e['description']} (updated {e['updated_at']})"
         + (f" [recall={e['recall']}]" if e.get("recall") not in (None, "relevance") else "")
         + (f" (archived {e['archived_at']})" if e.get("archived_at") else "")
         for e in entries
-    )
+    ) + nudge
 
 
 @mcp.tool

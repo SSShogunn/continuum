@@ -2,8 +2,7 @@
 "use strict";
 
 // SessionEnd hook: hand the finished transcript to Continuum, which extracts
-// memory candidates for review in the dashboard. Nothing is written to memory
-// automatically — the candidates sit in a queue until approved.
+// and saves durable facts as memory entries directly.
 //
 // Installed by Continuum's install-hook script. Pure Node core modules and no
 // dependencies, so the same file runs unchanged on Linux, macOS and Windows.
@@ -20,6 +19,8 @@ const CAPTURE_DISABLE_FILE = path.join(STATE_DIR, "capture-disabled");
 const WORKSPACE_MAP = path.join(STATE_DIR, "workspace-map.json");
 
 const CONTINUUM_URL = process.env.CONTINUUM_MCP_URL || "https://continuum-mcp.sshogunn.org";
+// Stamped to the release commit SHA at release time — see continuum_context_inject.js.
+const HOOK_VERSION = "__HOOK_VERSION__";
 const TIMEOUT_MS = 10000;
 const TURN_CHARS = 4000;
 const TRANSCRIPT_CHARS = 40000;
@@ -106,7 +107,11 @@ async function main() {
   try {
     await fetch(`${CONTINUUM_URL.replace(/\/$/, "")}/hook/session`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "X-Continuum-Hook-Version": HOOK_VERSION,
+      },
       body: JSON.stringify(payload),
       signal: controller.signal,
     });

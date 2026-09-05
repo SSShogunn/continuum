@@ -75,6 +75,7 @@ function sha256(data) {
 
 async function main() {
   touchStamp();
+  const updated = [];
   for (const [filename, source] of Object.entries(MANAGED)) {
     const filePath = path.join(HOOKS_DIR, filename);
     if (!fs.existsSync(filePath)) continue;
@@ -91,14 +92,21 @@ async function main() {
       continue;
     }
     replace(filePath, latest);
+    updated.push(filename);
   }
+  return updated;
 }
 
 (async () => {
+  let updated = [];
   try {
-    await main();
+    updated = await main();
   } catch {
-    // best effort, never surfaces
+    // best effort, never surfaces to a caller relying on exit code
   }
+  // Only meaningful to whoever ran this in a foreground shell (e.g. the
+  // /continuum-update slash command) — a detached background spawn passes
+  // stdio: "ignore", so this is silently discarded there.
+  console.log(updated.length ? `Updated: ${updated.join(", ")}` : "Already up to date.");
   process.exit(0);
 })();

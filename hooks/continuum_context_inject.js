@@ -23,6 +23,11 @@ const UPDATE_DISABLE_FILE = path.join(STATE_DIR, "no-auto-update");
 const UPDATER = path.join(os.homedir(), ".claude", "hooks", "continuum-self-update.js");
 
 const CONTINUUM_URL = process.env.CONTINUUM_MCP_URL || "https://continuum-mcp.sshogunn.org";
+// Stamped to the actual release commit SHA at release time (see
+// .github/workflows/release-hooks.yml) — the committed placeholder here is
+// never sent as-is, since a hook running straight from a git checkout rather
+// than an installed release is a dev scenario, not one core-mcp needs to track.
+const HOOK_VERSION = "__HOOK_VERSION__";
 const TIMEOUT_MS = 3000;
 const RECENT_TURNS = 6;
 const RECENT_TURN_CHARS = 600;
@@ -97,7 +102,11 @@ async function postContext(token, payload) {
   try {
     const response = await fetch(`${CONTINUUM_URL.replace(/\/$/, "")}/hook/context`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "X-Continuum-Hook-Version": HOOK_VERSION,
+      },
       body: JSON.stringify(payload),
       signal: controller.signal,
     });

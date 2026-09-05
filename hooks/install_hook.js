@@ -33,8 +33,16 @@ const HOME = os.homedir();
 const STATE_DIR = path.join(HOME, ".continuum");
 const CLAUDE_DIR = path.join(HOME, ".claude");
 const HOOKS_DIR = path.join(CLAUDE_DIR, "hooks");
+const COMMANDS_DIR = path.join(CLAUDE_DIR, "commands");
 const SETTINGS_PATH = path.join(CLAUDE_DIR, "settings.json");
 const TOKEN_PATH = path.join(STATE_DIR, "hook-token");
+
+const UPDATE_COMMAND = `---
+description: Force-check for and apply Continuum hook updates now
+---
+Run \`node ~/.claude/hooks/continuum-self-update.js\` with the Bash tool and report its output
+verbatim — it prints either "Already up to date." or which files it just updated.
+`;
 
 const HOOKS = [
   ["UserPromptSubmit", "continuum-context-inject", "continuum_context_inject.js", 5],
@@ -244,6 +252,9 @@ async function main() {
   const updaterPath = path.join(HOOKS_DIR, UPDATER[0] + ".js");
   fs.writeFileSync(updaterPath, sources[UPDATER[1]]);
   removeLegacy(UPDATER[0]);
+
+  fs.mkdirSync(COMMANDS_DIR, { recursive: true });
+  fs.writeFileSync(path.join(COMMANDS_DIR, "continuum-update.md"), UPDATE_COMMAND);
   endStep();
 
   startStep("enabling in Claude Code");
@@ -255,9 +266,9 @@ async function main() {
   console.log("Continuum is set up.");
   console.log("");
   console.log("  Auto-context     relevant memory added to every message");
-  console.log("  Session capture  suggestions saved for review in the dashboard");
+  console.log("  Session capture  durable facts saved directly at the end of each session");
   console.log("");
-  console.log("Updates install themselves in the background.");
+  console.log("Updates install themselves in the background — run /continuum-update to force a check now.");
   console.log("Restart Claude Code to finish. You can turn these off in the dashboard.");
 }
 

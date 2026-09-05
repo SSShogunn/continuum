@@ -18,6 +18,7 @@ const path = require("path");
 const HOME = os.homedir();
 const STATE_DIR = path.join(HOME, ".continuum");
 const HOOKS_DIR = path.join(HOME, ".claude", "hooks");
+const COMMAND_PATH = path.join(HOME, ".claude", "commands", "continuum-update.md");
 const SETTINGS_PATH = path.join(HOME, ".claude", "settings.json");
 
 const STEMS = ["continuum-context-inject", "continuum-session-capture", "continuum-self-update"];
@@ -34,6 +35,11 @@ function removeFiles() {
     }
   }
   fs.rmSync(STATE_DIR, { recursive: true, force: true });
+  try {
+    fs.unlinkSync(COMMAND_PATH);
+  } catch {
+    // wasn't there — fine
+  }
 }
 
 function cleanSettings() {
