@@ -4,14 +4,7 @@ services:
     container_name: continuum-frontend
     restart: unless-stopped
     ports:
-      - "3000:3000"
-    volumes:
-      - ./frontend/src:/app/src
-      - ./frontend/public:/app/public
-      - ./frontend/index.html:/app/index.html
-      - ./frontend/vite.config.ts:/app/vite.config.ts
-    env_file:
-      - ./frontend/.env
+      - "${FRONTEND_PORT:-3000}:3000"
     depends_on:
       backend:
         condition: service_started
