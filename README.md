@@ -6,6 +6,10 @@ sessions instead of starting from zero every time.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+[![Continuum demo](frontend/src/assets/continuum-demo.gif)](frontend/src/assets/continuum-demo.mp4)
+
+<sub>Click the GIF for the full 89-second video with sound.</sub>
+
 ## Quick start
 
 Use the hosted instance — no setup required:
