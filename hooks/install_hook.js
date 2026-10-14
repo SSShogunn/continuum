@@ -5,7 +5,9 @@
 //
 // Wires up a UserPromptSubmit hook that injects relevant Continuum memory into
 // every message automatically, without relying on the model deciding to call
-// memory_search, plus a SessionEnd hook that queues memory candidates for review.
+// memory_search (plus SessionStart, where the same script delivers standing
+// rules once per session), and SessionEnd + PreCompact hooks that capture
+// durable facts from the transcript into memory.
 // Safe to re-run (idempotent) — re-running just refreshes the token and hook
 // scripts, and won't duplicate the settings.json entry. Also cleans up an
 // older Python-based install if one is present, so the two don't run side by side.
@@ -44,9 +46,13 @@ Run \`node ~/.claude/hooks/continuum-self-update.js\` with the Bash tool and rep
 verbatim — it prints either "Already up to date." or which files it just updated.
 `;
 
+// [event, installed stem, published file, timeout]. One script can serve
+// several events; it branches on hook_event_name.
 const HOOKS = [
   ["UserPromptSubmit", "continuum-context-inject", "continuum_context_inject.js", 5],
+  ["SessionStart", "continuum-context-inject", "continuum_context_inject.js", 5],
   ["SessionEnd", "continuum-session-capture", "continuum_session_capture.js", 15],
+  ["PreCompact", "continuum-session-capture", "continuum_session_capture.js", 15],
 ];
 const UPDATER = ["continuum-self-update", "continuum_self_update.js"];
 
@@ -218,7 +224,7 @@ async function main() {
 
   const token = await readToken();
 
-  const names = HOOKS.map(([, , name]) => name).concat([UPDATER[1]]);
+  const names = [...new Set(HOOKS.map(([, , name]) => name))].concat([UPDATER[1]]);
   startStep(`downloading (0/${names.length})`);
   let done = 0;
   const sources = {};

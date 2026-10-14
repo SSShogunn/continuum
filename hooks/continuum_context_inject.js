@@ -3,6 +3,10 @@
 
 // UserPromptSubmit hook: auto-inject relevant Continuum memory into every
 // message, without relying on the model deciding to call memory_search.
+// Also registered for SessionStart (startup, resume, clear, compact), where it
+// delivers the standing rules once per session instead of on every prompt; the
+// session id sent with each call lets the server skip anything this session
+// has already been shown.
 //
 // Installed by Continuum's install-hook script. Pure Node core modules and no
 // dependencies, so the same file runs unchanged on Linux, macOS and Windows.
@@ -142,22 +146,28 @@ async function main() {
   } catch {
     return;
   }
-  const prompt = data.prompt || "";
-  if (!prompt) return;
-
-  const payload = { query: prompt };
+  const event = data.hook_event_name === "SessionStart" ? "SessionStart" : "UserPromptSubmit";
+  const payload = {};
+  if (data.session_id) payload.session_id = data.session_id;
   const workspace = workspaceFor(data.cwd || "");
   if (workspace) payload.workspace = workspace;
-  const recent = recentTurns(data.transcript_path || "");
-  if (recent) payload.recent = recent;
+
+  if (event === "SessionStart") {
+    payload.event = "session_start";
+    if (data.source) payload.source = data.source;
+  } else {
+    const prompt = data.prompt || "";
+    if (!prompt) return;
+    payload.query = prompt;
+    const recent = recentTurns(data.transcript_path || "");
+    if (recent) payload.recent = recent;
+  }
 
   const result = await postContext(token, payload);
   const context = result && result.context;
   if (context) {
     process.stdout.write(
-      JSON.stringify({
-        hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: context },
-      }) + "\n"
+      JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: context } }) + "\n"
     );
   }
 }

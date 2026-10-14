@@ -21,6 +21,15 @@ const vm = require("vm");
 const STATE_DIR = path.join(os.homedir(), ".continuum");
 const HOOKS_DIR = path.join(os.homedir(), ".claude", "hooks");
 const STAMP_FILE = path.join(STATE_DIR, "update-checked-at");
+const SETTINGS_PATH = path.join(os.homedir(), ".claude", "settings.json");
+
+// Events added after a script first shipped: [new event, the event an existing
+// install already has for the same script, stem, timeout]. Replacing files
+// alone would leave these unwired until a manual reinstall.
+const WIRING = [
+  ["SessionStart", "UserPromptSubmit", "continuum-context-inject", 5],
+  ["PreCompact", "SessionEnd", "continuum-session-capture", 15],
+];
 
 const CONTINUUM_URL = process.env.CONTINUUM_MCP_URL || "https://continuum-mcp.sshogunn.org";
 const TIMEOUT_MS = 20000;
@@ -73,6 +82,49 @@ function sha256(data) {
   return crypto.createHash("sha256").update(data).digest("hex");
 }
 
+function commandFor(groups, stem) {
+  for (const group of groups || []) {
+    for (const entry of group.hooks || []) {
+      if (String(entry.command || "").includes(stem)) return entry.command;
+    }
+  }
+  return null;
+}
+
+// Adds any missing WIRING event to ~/.claude/settings.json, reusing the exact
+// command the install already registered. Only touches installs that have the
+// sibling event, so an uninstalled or partially removed setup stays as it is.
+function ensureWiring() {
+  let settings;
+  try {
+    settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf-8"));
+  } catch {
+    return [];
+  }
+  const hooks = settings.hooks || {};
+  const added = [];
+  for (const [event, sibling, stem, timeout] of WIRING) {
+    const command = commandFor(hooks[sibling], stem);
+    if (!command || commandFor(hooks[event], stem)) continue;
+    (hooks[event] || (hooks[event] = [])).push({ matcher: "*", hooks: [{ type: "command", command, timeout }] });
+    added.push(event);
+  }
+  if (added.length) {
+    const temp = path.join(path.dirname(SETTINGS_PATH), `.settings-${crypto.randomBytes(6).toString("hex")}.json`);
+    try {
+      fs.writeFileSync(temp, JSON.stringify(settings, null, 2) + "\n");
+      fs.renameSync(temp, SETTINGS_PATH);
+    } catch {
+      try {
+        fs.unlinkSync(temp);
+      } catch {
+      }
+      return [];
+    }
+  }
+  return added;
+}
+
 async function main() {
   touchStamp();
   const updated = [];
@@ -94,6 +146,7 @@ async function main() {
     replace(filePath, latest);
     updated.push(filename);
   }
+  for (const event of ensureWiring()) updated.push(`${event} hook`);
   return updated;
 }
 

@@ -3,7 +3,7 @@
 
 // Continuum — Claude Code auto-context uninstaller.
 //
-// Reverses install_hook.js: removes the UserPromptSubmit and SessionEnd hook
+// Reverses install_hook.js: removes the UserPromptSubmit/SessionStart and SessionEnd/PreCompact hook
 // scripts (including any leftover files from the older Python-based install),
 // their settings.json registrations, and the local token/workspace state.
 // Safe to re-run (idempotent), safe to run even if never installed.
@@ -22,7 +22,7 @@ const COMMAND_PATH = path.join(HOME, ".claude", "commands", "continuum-update.md
 const SETTINGS_PATH = path.join(HOME, ".claude", "settings.json");
 
 const STEMS = ["continuum-context-inject", "continuum-session-capture", "continuum-self-update"];
-const EVENTS = ["UserPromptSubmit", "SessionEnd"];
+const EVENTS = ["UserPromptSubmit", "SessionStart", "SessionEnd", "PreCompact"];
 
 function removeFiles() {
   for (const stem of STEMS) {
