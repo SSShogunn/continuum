@@ -3,6 +3,8 @@ import { Link } from "react-router-dom";
 import { useUser } from "@clerk/react";
 import { ArrowRight, RotateCcw } from "lucide-react";
 import { ContinuumMark } from "@/components/continuum-mark";
+import demoVideo from "@/assets/continuum-demo.mp4";
+import demoPoster from "@/assets/continuum-demo-poster.jpg";
 import styles from "./Home.module.css";
 
 const STEPS = [
@@ -113,6 +115,22 @@ export default function Home() {
               </div>
             )}
           </div>
+        </div>
+      </section>
+
+      <section className={`${styles.section} ${styles.videoSection}`}>
+        <h2 className={styles.sectionHeading}>Watch it remember</h2>
+        <div className={styles.videoFrame}>
+          <span className={styles.callNumber}>REEL-01 · 89s</span>
+          <video
+            className={styles.video}
+            src={demoVideo}
+            poster={demoPoster}
+            controls
+            preload="none"
+            playsInline
+            aria-label="Continuum demo: capturing a session, injecting memory into the next prompt, and building the knowledge graph"
+          />
         </div>
       </section>
 

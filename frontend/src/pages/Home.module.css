@@ -235,6 +235,27 @@
   border-bottom-color: var(--ink-red-deep);
 }
 
+.videoSection {
+  padding-bottom: 0;
+}
+
+.videoFrame {
+  composes: indexCard;
+  padding: 2rem 1.25rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.video {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 2px;
+  background: var(--steel-deep);
+}
+
 /* ---------- mechanism ---------- */
 
 .mechanismGrid {
