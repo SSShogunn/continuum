@@ -53,7 +53,7 @@ def store(monkeypatch):
         ]},
         "entries": {"u:proj": [entry("proj-arch", 0.02)], "u:default": [entry("user-role", 0.03), entry("proj-arch", 0.01)]},
         "facts": {"u:proj": [fact("api uses fastapi", 0.02)], "u:default": [fact("api uses fastapi", 0.01)]},
-        "relevant": {"u:proj": True, "u:default": True},
+        "tops": {"u:proj": (0.70, 0.80), "u:default": (0.60, 0.75)},
         "search_kwargs": [],
         "embeds": 0,
     }
@@ -65,8 +65,8 @@ def store(monkeypatch):
     async def list_directives(owner):
         return data["directives"][owner]
 
-    async def is_relevant(owner, emb):
-        return data["relevant"][owner]
+    async def top_similarity(owner, emb):
+        return data["tops"][owner]
 
     async def msearch(query, top_k=5, owner="", recall_in=None, **kw):
         data["search_kwargs"].append(kw)
@@ -83,7 +83,7 @@ def store(monkeypatch):
     monkeypatch.setattr(prompt.memory, "list_directives", list_directives)
     monkeypatch.setattr(prompt.memory, "search", msearch)
     monkeypatch.setattr(prompt.memory, "list_by_names", list_by_names)
-    monkeypatch.setattr(prompt.search, "is_relevant", is_relevant)
+    monkeypatch.setattr(prompt.search, "top_similarity", top_similarity)
     monkeypatch.setattr(prompt.search, "fact_search", fsearch)
     return data
 
@@ -103,11 +103,30 @@ def test_legacy_hook_without_session_gets_everything_every_time(store):
         assert result["memories"] == ["user-role", "proj-arch"]
 
 
-def test_query_is_embedded_once_and_reused_with_floor(store):
+def test_query_is_embedded_once_and_reused(store):
     build()
     assert store["embeds"] == 1
-    assert all(kw["query_embedding"] == [0.0] and kw["min_similarity"] == prompt.HOOK_ITEM_FLOOR
-               for kw in store["search_kwargs"])
+    assert all(kw["query_embedding"] == [0.0] for kw in store["search_kwargs"])
+
+
+def test_floors_sit_a_margin_below_the_best_match_across_owners(store):
+    build()
+    memory_floor, fact_floor = store["search_kwargs"][0]["min_similarity"], store["search_kwargs"][1]["min_similarity"]
+    assert memory_floor == pytest.approx(0.70 - prompt.HOOK_ITEM_MARGIN)
+    assert fact_floor == pytest.approx(0.80 - prompt.HOOK_ITEM_MARGIN)
+
+
+def test_floor_never_drops_below_the_absolute_minimum(store):
+    store["tops"] = {"u:proj": (0.50, 0.73), "u:default": (0.40, 0.60)}
+    build()
+    assert store["search_kwargs"][0]["min_similarity"] == prompt.HOOK_ITEM_FLOOR
+
+
+def test_owner_below_the_gate_is_not_searched(store):
+    store["tops"] = {"u:proj": (0.70, 0.80), "u:default": (0.65, 0.70)}
+    result = build()
+    assert len(store["search_kwargs"]) == 2
+    assert result["memories"] == ["proj-arch"]
 
 
 def test_owners_are_merged_ranked_and_deduped(store):
@@ -156,7 +175,7 @@ def test_session_start_resets_what_was_seen(store):
 
 
 def test_irrelevant_message_injects_nothing_once_rules_delivered(store):
-    store["relevant"] = {"u:proj": False, "u:default": False}
+    store["tops"] = {"u:proj": (0.6, 0.65), "u:default": (0.5, 0.6)}
     session = hook_session.HookSession(FakeRedis(), "u", "sess-1")
     run(prompt.build_session_start_context("u:proj", extra_owner="u:default", workspace="proj", session=session))
     assert build(session, query="thanks")["context"] is None

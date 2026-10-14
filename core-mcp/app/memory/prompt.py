@@ -13,10 +13,8 @@ HOOK_QUERY_EXPAND_CHARS = int(os.environ.get("CONTINUUM_HOOK_QUERY_EXPAND_CHARS"
 HOOK_RECENT_CHARS = int(os.environ.get("CONTINUUM_HOOK_RECENT_CHARS", "600"))
 HOOK_LINK_FANOUT = int(os.environ.get("CONTINUUM_HOOK_LINK_FANOUT", "3"))
 HOOK_FACT_LIMIT = int(os.environ.get("CONTINUUM_HOOK_FACT_LIMIT", "6"))
-# Per-item cosine floor for auto-injected memories and facts, past the top-1
-# gate. Defaults to the gate itself: an item that alone wouldn't have opened
-# the gate isn't relevant enough to ride along.
-HOOK_ITEM_FLOOR = float(os.environ.get("CONTINUUM_HOOK_ITEM_FLOOR", str(search.HOOK_RELEVANCE_GATE)))
+HOOK_ITEM_FLOOR = float(os.environ.get("CONTINUUM_HOOK_ITEM_FLOOR", "0.55"))
+HOOK_ITEM_MARGIN = float(os.environ.get("CONTINUUM_HOOK_ITEM_MARGIN", "0.05"))
 
 
 def _memory_block(e: dict) -> str:
@@ -226,8 +224,8 @@ async def build_hook_context(
     prior turns only blurs the query.
 
     The query is embedded once and reused for the gate and for every owner's
-    memory and fact search. Past the gate, each semantic hit must also clear
-    HOOK_ITEM_FLOOR, so one strong match doesn't carry weak neighbours in.
+    memory and fact search. Past the gate, each semantic hit must clear
+    HOOK_ITEM_FLOOR and sit within HOOK_ITEM_MARGIN of the best match of its kind.
 
     Returns the rendered context plus what went into it, so the caller can log
     which memories were actually injected."""
@@ -251,8 +249,12 @@ async def build_hook_context(
             await session.set_directives_digest(digest)
 
     query_embedding = await embed(retrieval_query[:2000])
-    relevance = await asyncio.gather(*(search.is_relevant(o, query_embedding) for o in owners))
-    relevant_owners = [o for o, ok in zip(owners, relevance) if ok]
+    tops = await asyncio.gather(*(search.top_similarity(o, query_embedding) for o in owners))
+    relevant_owners = [o for o, (m, f) in zip(owners, tops) if max(m, f) >= search.HOOK_RELEVANCE_GATE]
+    best_memory = max((m for o, (m, _) in zip(owners, tops) if o in relevant_owners), default=0.0)
+    best_fact = max((f for o, (_, f) in zip(owners, tops) if o in relevant_owners), default=0.0)
+    memory_floor = max(HOOK_ITEM_FLOOR, best_memory - HOOK_ITEM_MARGIN)
+    fact_floor = max(HOOK_ITEM_FLOOR, best_fact - HOOK_ITEM_MARGIN)
 
     entries: dict[str, dict] = {}
     facts: dict[str, dict] = {}
@@ -261,11 +263,11 @@ async def build_hook_context(
             asyncio.gather(
                 memory.search(
                     retrieval_query, top_k=top_k, owner=o, recall_in=["relevance"],
-                    query_embedding=query_embedding, min_similarity=HOOK_ITEM_FLOOR,
+                    query_embedding=query_embedding, min_similarity=memory_floor,
                 ),
                 search.fact_search(
                     o, retrieval_query, top_k=HOOK_FACT_LIMIT,
-                    query_embedding=query_embedding, min_similarity=HOOK_ITEM_FLOOR,
+                    query_embedding=query_embedding, min_similarity=fact_floor,
                 ),
             )
             for o in relevant_owners

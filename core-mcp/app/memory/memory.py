@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 from datetime import datetime, timezone
 
 from ..infra import pg
@@ -13,6 +14,12 @@ logger = logging.getLogger("continuum.memory")
 HALF_LIFE_DAYS = float(os.environ.get("CONTINUUM_MEMORY_RECENCY_HALFLIFE_DAYS", "365"))
 RECENCY_FLOOR = float(os.environ.get("CONTINUUM_MEMORY_RECENCY_FLOOR", "0.7"))
 
+_TAG_SUFFIX = re.compile(r"(\s*\[[^\[\]]*\])+\s*$")
+
+
+def clean_name(name: str) -> str:
+    return _TAG_SUFFIX.sub("", name).strip() or name.strip()
+
 
 async def save(
     name: str,
@@ -23,6 +30,7 @@ async def save(
     supersedes: list[str] | None = None,
     recall: str | None = None,
 ) -> dict:
+    name = clean_name(name)
     tier = normalize_recall(recall, type)
     now = datetime.now(timezone.utc)
     if not supersedes:

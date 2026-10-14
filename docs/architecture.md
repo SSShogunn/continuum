@@ -60,9 +60,13 @@ Retrieval details:
 - **Embedded once.** The query is embedded a single time and reused for the gate and for every
   owner's memory and fact search (the MCP `memory_search`/`memory_fact_search` tools do the same
   across workspaces).
-- **Per-item floor.** Past the top-1 gate, each semantic hit must also clear
-  `CONTINUUM_HOOK_ITEM_FLOOR` (defaults to the gate), so one strong match doesn't carry weak
-  neighbours in. Lexical hits are exact-term matches and are kept.
+- **Gate.** A workspace is searched only if its best memory or fact clears
+  `CONTINUUM_HOOK_RELEVANCE_GATE` (default 0.72). bge-small scores even unrelated text around
+  0.65–0.70, so vague prompts ("write a commit message") inject nothing.
+- **Relative floor.** Past the gate, each semantic hit must sit within `CONTINUUM_HOOK_ITEM_MARGIN`
+  (default 0.05) of the best match of its kind (memories and facts separately, across
+  workspaces) and above `CONTINUUM_HOOK_ITEM_FLOOR` (default 0.55). Only the tight cluster around
+  the best match rides along. Lexical hits are exact-term matches and are kept.
 - **Ranked across workspaces.** Results from the project workspace and `default` are deduped and
   ranked together (memories: `top_k`, facts: `CONTINUUM_HOOK_FACT_LIMIT`), not concatenated.
 - **Short prompts** (under `CONTINUUM_HOOK_QUERY_EXPAND_CHARS`, usually deictic — "do the same for

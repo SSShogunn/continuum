@@ -14,6 +14,20 @@ def test_above_floor_keeps_only_close_semantic_hits():
     assert search.above_floor(rows, None) == rows
 
 
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("memory-save-selectivity [preference]", "memory-save-selectivity"),
+        ("chat-quality-drop [project] [project]", "chat-quality-drop"),
+        ("  plain-name  ", "plain-name"),
+        ("[only-a-tag]", "[only-a-tag]"),
+        ("uses [brackets] mid-name", "uses [brackets] mid-name"),
+    ],
+)
+def test_clean_name_strips_trailing_type_tags(raw, expected):
+    assert memory.clean_name(raw) == expected
+
+
 def test_new_lines_ignores_bullets_case_and_spacing():
     existing = "- Uses FastAPI\n- deploys  via docker"
     assert capture.new_lines(existing, "* uses fastapi\n- Deploys via Docker\n- Redis 7 for queues") == "- Redis 7 for queues"

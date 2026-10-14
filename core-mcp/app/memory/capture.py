@@ -149,7 +149,7 @@ async def extract_candidates(owner: str, session_id: str, transcript: str) -> in
 
     written = 0
     for c in result.candidates[:CAPTURE_MAX_CANDIDATES]:
-        name, content = c.name.strip(), c.content.strip()
+        name, content = memory.clean_name(c.name), c.content.strip()
         if name and content:
             written += await _write_candidate(c, name, content, owners, shown)
     return written

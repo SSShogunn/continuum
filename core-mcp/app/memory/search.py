@@ -8,7 +8,7 @@ logger = logging.getLogger("continuum.search")
 
 RRF_K = 60
 NODE_MATCH_GATE = 0.5
-HOOK_RELEVANCE_GATE = float(os.environ.get("CONTINUUM_HOOK_RELEVANCE_GATE", "0.45"))
+HOOK_RELEVANCE_GATE = float(os.environ.get("CONTINUUM_HOOK_RELEVANCE_GATE", "0.72"))
 
 
 def above_floor(semantic_rows, floor: float | None) -> list:
@@ -82,15 +82,7 @@ async def graph_search(owner: str, entity: str) -> dict | None:
     }
 
 
-async def is_relevant(owner: str, query_embedding: list[float], gate: float = HOOK_RELEVANCE_GATE) -> bool:
-    """Cheap top-1 cosine check used to gate auto-injected context — cuts noise on
-    messages with nothing worth surfacing (small talk, unrelated topics) without
-    paying for a full hybrid search first.
-
-    Only `relevance`-tier memories can open the gate: always-on directives are
-    injected regardless, so letting one of them trip the gate would drag in
-    unrelated memories on every message it happens to embed near, and `manual`
-    entries are explicitly opted out of auto-injection."""
+async def top_similarity(owner: str, query_embedding: list[float]) -> tuple[float, float]:
     async with pg.pool().acquire() as conn:
         memory_score = await conn.fetchval(
             """
@@ -108,7 +100,7 @@ async def is_relevant(owner: str, query_embedding: list[float], gate: float = HO
             """,
             query_embedding, owner,
         )
-    return max(memory_score or 0.0, fact_score or 0.0) >= gate
+    return float(memory_score or 0.0), float(fact_score or 0.0)
 
 
 async def fact_search(
