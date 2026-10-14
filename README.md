@@ -14,8 +14,8 @@ Use the hosted instance — no setup required:
 2. Connect a client:
    - **Claude Code**: `claude mcp add --transport http continuum https://continuum-mcp.sshogunn.org/mcp`
    - **Claude.ai**: Settings → Connectors → Add custom connector → `https://continuum-mcp.sshogunn.org/mcp`
-3. Optional — install the auto-context hook so memory gets injected into every Claude Code prompt
-   automatically, no tool call needed:
+3. Optional — install the Claude Code hooks so memory gets injected into every prompt
+   automatically (no tool call needed) and durable facts from your sessions are saved for you:
    ```bash
    # macOS / Linux / WSL / Git Bash
    curl -fsSL https://continuum-mcp.sshogunn.org/install_hook.js | CONTINUUM_TOKEN=<token> node
@@ -34,18 +34,23 @@ Prefer to run your own instance? See [Self-hosting](#self-hosting).
 
 ## What it does
 
-- **Persistent memory** — `memory_save` / `memory_search` / `memory_list` / `memory_delete`,
-  scoped per user.
-- **Fact extraction** — every saved memory is decomposed in the background into atomic,
-  independently searchable facts (`memory_fact_search`), so retrieval doesn't compete against a
-  whole blob for relevance.
-- **Auto-injected context** — an optional hook injects relevant memory into every Claude Code
-  prompt without the model deciding to call a tool.
-- **Session capture** — an optional hook reviews finished conversations and proposes new
-  memories to save or discard, instead of relying on the model remembering to write them.
+- **Persistent memory** — save, search, list, append, archive and delete entries, scoped per
+  user and per project **workspace** (every workspace is searched together with `default`).
+- **Recall tiers** — `always` (standing rules, injected every message), `relevance` (surfaced on
+  semantic match), `manual` (explicit lookup only).
+- **Knowledge graph** — every saved memory is extracted in the background into entities and
+  relationships. Each relationship is a one-sentence fact with its own embedding, searchable via
+  `memory_fact_search` and `memory_graph_search`. Facts that a newer memory contradicts are
+  marked no-longer-true rather than deleted.
+- **Auto-injected context** — an optional Claude Code hook injects relevant memory into every
+  prompt without the model deciding to call a tool, and never repeats what the session has
+  already been shown.
+- **Session capture** — the same hook install captures durable facts from your sessions (before
+  compaction and at session end) and saves them directly, merging into existing entries instead
+  of duplicating them.
 - **Web tools** — `fetch_page`, `screenshot_page`, `search_web` (self-hosted SearXNG, no paid
-  API), `check_url`, `verify_quote`.
-- **OAuth 2.0** — PKCE flow, verified working with Claude.ai.
+  API), `check_url`, `verify_quote`, `extract_structured`.
+- **OAuth 2.0** — PKCE flow with dynamic client registration, verified working with Claude.ai.
 
 Full breakdown of how the memory pipeline and hooks work: [docs/architecture.md](docs/architecture.md).
 
@@ -59,10 +64,15 @@ Full breakdown of how the memory pipeline and hooks work: [docs/architecture.md]
 | `search_web` | Web search via a self-hosted SearXNG instance. |
 | `check_url` | Verify a URL actually resolves. |
 | `verify_quote` | Check whether a quoted string appears verbatim on a page, fuzzy-matching the closest passage if not. |
+| `extract_structured` | Fetch a page and extract JSON matching a schema or a plain-language field list (LLM). |
 | `memory_save` / `memory_search` / `memory_list` / `memory_delete` | Persistent memory CRUD. |
-| `memory_set_recall` | Move a memory between recall tiers (`always` / `relevance` / `manual`). |
 | `memory_append` | Add a line to an existing memory without resending its whole body. |
-| `memory_fact_search` | Semantic search over extracted atomic facts. |
+| `memory_set_recall` | Move a memory between recall tiers (`always` / `relevance` / `manual`). |
+| `memory_archive` / `memory_restore` | Hide an entry from search and listing without deleting it, and undo that. |
+| `memory_fact_search` | Hybrid (semantic + full-text) search over knowledge-graph facts. |
+| `memory_graph_search` | Everything currently known about one entity: type, summary, live relationships. |
+| `memory_list_workspaces` | List the account's workspaces. |
+| `memory_export` / `memory_import` | Portable JSON export of a workspace, and import into one. |
 
 ## Self-hosting
 
@@ -106,10 +116,14 @@ to be the same one.
 ```bash
 docker compose up -d --build
 ```
-This starts `frontend` (:3000), `backend` (:8789), `core-mcp` (:8788), plus `worker`, `postgres`,
-`redis`, and `searxng` — all reachable on localhost, no extra setup. `postgres` also publishes to
-`127.0.0.1:5432` for a host-local client. Schema migrations (`alembic upgrade head`) run
-automatically on boot.
+This starts `frontend` (:3000, or `FRONTEND_PORT` from the root `.env`), `backend` (:8789),
+`core-mcp` (:8788), plus `worker`, `postgres`, `redis`, and `searxng` — all reachable on
+localhost, no extra setup. `postgres` also publishes to `127.0.0.1:5432` for a host-local client.
+Schema migrations (`alembic upgrade head`) run automatically on boot.
+
+The frontend image is a static Vite build served by nginx, so its `VITE_*` values from
+`frontend/.env` are baked in when the image is built. After changing them, rebuild with
+`docker compose up -d --build frontend`.
 
 To expose it beyond localhost, put a reverse proxy (Caddy, nginx, Traefik) in front of ports
 3000/8789/8788, or set `CF_TUNNEL_TOKEN` in the root `.env` and run
@@ -129,9 +143,18 @@ cd core-mcp && uv sync && uv run playwright install chromium firefox
 uv run alembic upgrade head
 uv run python -m app.server
 
+cd core-mcp && uv run arq app.worker.WorkerSettings   # background jobs: graph build, session capture
+
 cd backend && uv sync && uv run alembic upgrade head && uv run python main.py
 
-cd frontend && npm install && npm run dev
+cd frontend && pnpm install && pnpm dev
+```
+
+### Tests
+
+```bash
+cd core-mcp && PYTHONPATH=. uv run pytest tests   # hook context assembly, capture merge rules, storage
+node --test hooks/test/hooks.test.js              # hook scripts against a fake server
 ```
 
 ## Repo layout
@@ -139,17 +162,23 @@ cd frontend && npm install && npm run dev
 ```
 core-mcp/
   app/
-    server.py        # FastMCP app, tool definitions, lifespan
-    auth.py           # JWT verification
-    infra/            # pg.py, db.py, browser_pool.py
-    memory/            # memory.py, facts.py, embeddings.py
+    server.py         # FastMCP app, MCP tools, /hook/* and /internal/* routes
+    worker.py         # arq worker: graph build, session capture, log pruning
+    auth.py           # JWT verification + revocation polling
+    infra/            # pg.py, db.py, redis.py, browser_pool.py
+    memory/           # memory.py, search.py, prompt.py (hook context), capture.py,
+                      # kg.py / extract.py / resolve.py / edges.py (knowledge graph),
+                      # hook_session.py, embeddings.py, llm.py
   alembic/            # schema migrations
+  tests/
 backend/
   app/                # FastAPI routes, OAuth, token management
   alembic/
 frontend/
   src/pages/          # Vite SPA — dashboard, oauth-connect, landing
-docker-compose.yml     # all services — secrets come from the .env files, see .env.example
+  nginx.conf          # static serving + SPA fallback for the Docker image
+hooks/                # Claude Code hooks, installer, updater (Node, no deps) + tests
+docker-compose.yml    # all services — secrets come from the .env files, see .env.example
 ```
 
 ## Environment variables
@@ -161,9 +190,11 @@ Each service has an `.env.example` with inline comments for every variable. Nota
   (optional — defaults to the self-hosted `searxng` service).
 - `backend`: `DATABASE_URL`, Clerk keys, `CONTINUUM_BACKEND_JWT_PRIVATE_KEY` (paired with
   core-mcp's public key).
-- `frontend`: Clerk keys, `BACKEND_INTERNAL_URL`.
-- root: `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, and (optional, `tunnel` profile only)
-  `CF_TUNNEL_TOKEN`.
+- `frontend`: `VITE_CLERK_PUBLISHABLE_KEY`, `VITE_BACKEND_URL` (called cross-origin with CORS),
+  `VITE_CONTINUUM_MCP_URL` (shown in the dashboard's connect/install commands). Read at build
+  time.
+- root: `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `FRONTEND_PORT` (optional), and (optional,
+  `tunnel` profile only) `CF_TUNNEL_TOKEN`.
 
 ## License
 
