@@ -1,8 +1,10 @@
 import asyncio
+import hashlib
 import os
 
-from . import links, memory, search
+from . import hook_session, links, memory, search
 from .embeddings import embed
+from .hook_session import HookSession
 
 HOOK_DIRECTIVE_LIMIT = int(os.environ.get("CONTINUUM_HOOK_DIRECTIVE_LIMIT", "12"))
 HOOK_DIRECTIVE_BUDGET_CHARS = int(os.environ.get("CONTINUUM_HOOK_DIRECTIVE_BUDGET_CHARS", "2400"))
@@ -10,6 +12,11 @@ HOOK_DIRECTIVE_ENTRY_CHARS = int(os.environ.get("CONTINUUM_HOOK_DIRECTIVE_ENTRY_
 HOOK_QUERY_EXPAND_CHARS = int(os.environ.get("CONTINUUM_HOOK_QUERY_EXPAND_CHARS", "80"))
 HOOK_RECENT_CHARS = int(os.environ.get("CONTINUUM_HOOK_RECENT_CHARS", "600"))
 HOOK_LINK_FANOUT = int(os.environ.get("CONTINUUM_HOOK_LINK_FANOUT", "3"))
+HOOK_FACT_LIMIT = int(os.environ.get("CONTINUUM_HOOK_FACT_LIMIT", "6"))
+# Per-item cosine floor for auto-injected memories and facts, past the top-1
+# gate. Defaults to the gate itself: an item that alone wouldn't have opened
+# the gate isn't relevant enough to ride along.
+HOOK_ITEM_FLOOR = float(os.environ.get("CONTINUUM_HOOK_ITEM_FLOOR", str(search.HOOK_RELEVANCE_GATE)))
 
 
 def _memory_block(e: dict) -> str:
@@ -128,6 +135,53 @@ async def _linked_entries(
     return list(seen.values())
 
 
+def directives_digest(directives: dict[str, dict]) -> str:
+    """Changes whenever a standing rule is added, removed or edited."""
+    h = hashlib.sha1()
+    for name in sorted(directives):
+        d = directives[name]
+        h.update(f"{name}\0{d['description']}\0{d['content']}\0".encode("utf-8"))
+    return h.hexdigest()
+
+
+async def _directives(owners: list[str]) -> dict[str, dict]:
+    results = await asyncio.gather(*(memory.list_directives(o) for o in owners))
+    directives: dict[str, dict] = {}
+    for owner_directives in results:
+        for d in owner_directives:
+            directives.setdefault(d["name"], d)
+    return directives
+
+
+def _scope_note(workspace: str, extra_owner: str | None) -> str:
+    return f"[Continuum memory — active workspace: {workspace}" + (" (+ default)]" if extra_owner else "]")
+
+
+def _fact_key(f: dict) -> str:
+    return f"{f['source']}\0{f['predicate']}\0{f['target']}\0{f['fact']}"
+
+
+async def build_session_start_context(
+    owner: str,
+    extra_owner: str | None = None,
+    workspace: str = "default",
+    session: "HookSession | None" = None,
+) -> dict:
+    """Context for a SessionStart hook (startup, resume, clear, compaction).
+    Standing rules are delivered here, once, instead of on every prompt; the
+    session's record of what it has seen is reset, since compaction or /clear
+    removed earlier injections from the model's view."""
+    owners = [owner] if not extra_owner or extra_owner == owner else [owner, extra_owner]
+    directives = await _directives(owners)
+    if session:
+        await session.reset()
+        await session.set_directives_digest(directives_digest(directives))
+    parts = [_scope_note(workspace, extra_owner)]
+    if directives:
+        parts.append(_directive_section(list(directives.values())))
+    return {"context": "\n\n".join(parts), "directives": list(directives)}
+
+
 async def build_hook_context(
     owner: str,
     query: str,
@@ -135,6 +189,7 @@ async def build_hook_context(
     extra_owner: str | None = None,
     recent: str | None = None,
     workspace: str = "default",
+    session: "HookSession | None" = None,
 ) -> dict:
     """Context for automatic per-message injection (e.g. a UserPromptSubmit hook).
     Returns None when nothing clears the relevance gate and no standing rules
@@ -151,12 +206,17 @@ async def build_hook_context(
     memory_search/memory_fact_search itself for detail. `recall="manual"` entries
     never appear here at all.
 
+    With a `session` (hooks that send a session id), nothing is repeated that
+    this session has already been shown: standing rules are sent once — at
+    SessionStart, or on the first prompt if that hook isn't installed — and
+    again only if they change; memories and facts are sent the first time they
+    match. Without one, every prompt gets everything, as before.
+
     `extra_owner` (e.g. the account's `default` workspace when `owner` is a
     project-scoped one) is merged in so switching to a project workspace can't
     hide cross-project rules or facts like identity/preferences that still live in
-    `default`. `workspace` is that scope's name, stated in the rendered header so
-    the model knows which workspace it is in without having to infer it from cwd —
-    a fact it is handed rather than a rule it has to remember.
+    `default`. Results from both are ranked together, not concatenated.
+    `workspace` is that scope's name, stated in the rendered header.
 
     `recent` is the tail of the conversation. A short message is usually deictic
     ("do the same for the other one", "why?") and embeds nowhere near anything
@@ -164,6 +224,10 @@ async def build_hook_context(
     the current message stays first so it still dominates the ranking. Long
     messages carry their own signal and are left alone, since padding them with
     prior turns only blurs the query.
+
+    The query is embedded once and reused for the gate and for every owner's
+    memory and fact search. Past the gate, each semantic hit must also clear
+    HOOK_ITEM_FLOOR, so one strong match doesn't carry weak neighbours in.
 
     Returns the rendered context plus what went into it, so the caller can log
     which memories were actually injected."""
@@ -175,58 +239,92 @@ async def build_hook_context(
         retrieval_query = f"{query}\n{recent[-HOOK_RECENT_CHARS:]}"
         expanded = True
 
-    directive_results = await asyncio.gather(*(memory.list_directives(o) for o in owners))
-    directives: dict[str, dict] = {}
-    for owner_directives in directive_results:
-        for d in owner_directives:
-            directives.setdefault(d["name"], d)
+    directives = await _directives(owners)
+    send_directives = bool(directives)
+    directives_updated = False
+    if session and directives:
+        digest = directives_digest(directives)
+        previous = await session.directives_digest()
+        send_directives = previous != digest
+        directives_updated = previous is not None and send_directives
+        if send_directives:
+            await session.set_directives_digest(digest)
 
-    query_embedding = await embed(retrieval_query[:500])
+    query_embedding = await embed(retrieval_query[:2000])
     relevance = await asyncio.gather(*(search.is_relevant(o, query_embedding) for o in owners))
     relevant_owners = [o for o, ok in zip(owners, relevance) if ok]
 
     entries: dict[str, dict] = {}
-    facts: list[dict] = []
+    facts: dict[str, dict] = {}
     if relevant_owners:
         results = await asyncio.gather(*(
             asyncio.gather(
-                memory.search(retrieval_query, top_k=top_k, owner=o, recall_in=["relevance"]),
-                search.fact_search(o, retrieval_query, top_k=top_k * 2),
+                memory.search(
+                    retrieval_query, top_k=top_k, owner=o, recall_in=["relevance"],
+                    query_embedding=query_embedding, min_similarity=HOOK_ITEM_FLOOR,
+                ),
+                search.fact_search(
+                    o, retrieval_query, top_k=HOOK_FACT_LIMIT,
+                    query_embedding=query_embedding, min_similarity=HOOK_ITEM_FLOOR,
+                ),
             )
             for o in relevant_owners
         ))
         for owner_entries, owner_facts in results:
             for e in owner_entries:
-                entries.setdefault(e["name"], e)
-            facts.extend(owner_facts)
+                if e["name"] not in entries or e["score"] > entries[e["name"]]["score"]:
+                    entries[e["name"]] = e
+            for f in owner_facts:
+                key = _fact_key(f)
+                if key not in facts or f["score"] > facts[key]["score"]:
+                    facts[key] = f
     for name in directives:
         entries.pop(name, None)
+    entries = dict(sorted(entries.items(), key=lambda kv: kv[1]["score"], reverse=True)[:top_k])
+    ranked_facts = sorted(facts.values(), key=lambda f: f["score"], reverse=True)[:HOOK_FACT_LIMIT]
 
     linked = await _linked_entries(entries, set(directives), owners) if entries else []
 
+    skipped_seen = 0
+    if session:
+        keyed = (
+            [(hook_session.item_key("m", n), ("entry", n)) for n in entries]
+            + [(hook_session.item_key("m", e["name"]), ("linked", e["name"])) for e in linked]
+            + [(hook_session.item_key("f", _fact_key(f)), ("fact", _fact_key(f))) for f in ranked_facts]
+        )
+        unseen = await session.unseen([k for k, _ in keyed])
+        skipped_seen = len(keyed) - len(unseen)
+        keep = {ref for k, ref in keyed if k in unseen}
+        entries = {n: e for n, e in entries.items() if ("entry", n) in keep}
+        linked = [e for e in linked if ("linked", e["name"]) in keep]
+        ranked_facts = [f for f in ranked_facts if ("fact", _fact_key(f)) in keep]
+        await session.mark_seen(list(unseen))
+
     injected = {
-        "directives": list(directives),
+        "directives": list(directives) if send_directives else [],
         "memories": list(entries),
         "linked": [e["name"] for e in linked],
-        "facts": len(facts),
+        "facts": len(ranked_facts),
         "gate_passed": bool(relevant_owners),
         "expanded": expanded,
+        "skipped_seen": skipped_seen,
     }
 
-    if not directives and not entries and not facts:
+    if not send_directives and not entries and not ranked_facts and not linked:
         return {"context": None, **injected}
 
-    scope_note = (
-        f"[Continuum memory — active workspace: {workspace}"
-        + (" (+ default)]" if extra_owner else "]")
-    )
-    parts = [scope_note]
-    if directives:
-        parts.append(_directive_section(list(directives.values())))
-    if entries or facts:
+    parts = [_scope_note(workspace, extra_owner)]
+    if send_directives:
+        section = _directive_section(list(directives.values()))
+        if directives_updated:
+            section = section.replace(
+                "## Standing rules — always apply", "## Standing rules (updated this session) — always apply", 1
+            )
+        parts.append(section)
+    if entries or ranked_facts or linked:
         related = ["## Possibly relevant to this message"]
-        if facts:
-            related.append(_fact_lines(facts))
+        if ranked_facts:
+            related.append(_fact_lines(ranked_facts))
         if entries:
             related.append(
                 "\n".join(f"- {e['name']} [{e['type']}]: {e['description']}" for e in entries.values())

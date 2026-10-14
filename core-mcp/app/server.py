@@ -12,6 +12,8 @@ from . import auth
 from .infra import browser_pool, db, pg
 from .infra import redis as redis_infra
 from .memory import kg, memory, prompt, search, taxonomy
+from .memory.embeddings import embed
+from .memory.hook_session import HookSession
 import html2text
 import httpx
 import litellm
@@ -403,18 +405,36 @@ async def hook_context(request: Request) -> Response:
     body = await _json_body(request)
     if body is None:
         return Response("Invalid JSON body", status_code=400)
-    query = (body.get("query") or "").strip()
-    if not query:
-        return JSONResponse({"context": None})
     workspace = body.get("workspace", "default")
     owner = auth.compose_owner(access_token.client_id, workspace)
     extra_owner = (
         auth.compose_owner(access_token.client_id, "default") if workspace != "default" else None
     )
+    # Hooks that send a session id get per-session dedup: standing rules once,
+    # each memory/fact the first time it matches. Older hooks send none and keep
+    # the inject-everything behaviour.
+    session = HookSession.maybe(redis_infra.pool(), access_token.client_id, body.get("session_id"))
 
     started = time.perf_counter()
+    if body.get("event") == "session_start":
+        result = await prompt.build_session_start_context(
+            owner, extra_owner=extra_owner, workspace=workspace, session=session
+        )
+        db.log_request(
+            "hook/context",
+            {"event": "session_start", "workspace": workspace, "source": body.get("source")},
+            "ok",
+            response=json.dumps({"directives": result["directives"]}),
+            duration_ms=(time.perf_counter() - started) * 1000,
+            owner=owner,
+        )
+        return JSONResponse({"context": result["context"]})
+
+    query = (body.get("query") or "").strip()
+    if not query:
+        return JSONResponse({"context": None})
     result = await prompt.build_hook_context(
-        owner, query, extra_owner=extra_owner, recent=body.get("recent"), workspace=workspace
+        owner, query, extra_owner=extra_owner, recent=body.get("recent"), workspace=workspace, session=session
     )
     # Logged like a tool call so injections show up in the Activity view next to
     # real ones: without a record of what was auto-injected there is no way to
@@ -429,6 +449,7 @@ async def hook_context(request: Request) -> Response:
             "memories": result["memories"],
             "linked": result["linked"],
             "facts": result["facts"],
+            "skipped_seen": result["skipped_seen"],
         }),
         duration_ms=(time.perf_counter() - started) * 1000,
         owner=owner,
@@ -1104,6 +1125,8 @@ async def memory_save(
     record = await memory.save(
         name, type, description, content, owner=owner, supersedes=supersedes, recall=recall
     )
+    if record.get("unchanged"):
+        return f"Memory '{record['name']}' already has this exact content — nothing changed."
     return f"Saved memory '{record['name']}' (type={record['type']}, recall={record['recall']})."
 
 
@@ -1117,8 +1140,12 @@ async def memory_search(query: str, top_k: int = 5, type: str | None = None, wor
     context you don't already have in this conversation. When in doubt, search — it's cheap to find
     nothing, and expensive to silently re-ask the user for facts they already gave you."""
     scope = _read_scope(workspace)
+    query_embedding = await embed(query)
     per_owner = await asyncio.gather(
-        *(memory.search(query, top_k=top_k, type=type, owner=owner) for _, owner in scope)
+        *(
+            memory.search(query, top_k=top_k, type=type, owner=owner, query_embedding=query_embedding)
+            for _, owner in scope
+        )
     )
     merged: dict[str, dict] = {}
     for (name, _), entries in zip(scope, per_owner):
@@ -1144,8 +1171,9 @@ async def memory_fact_search(query: str, top_k: int = 5, workspace: str = "defau
     matching facts instead of whole memory blobs, so it's the cheaper first call for a pointed
     question."""
     scope = _read_scope(workspace)
+    query_embedding = await embed(query)
     per_owner = await asyncio.gather(
-        *(search.fact_search(owner, query, top_k=top_k) for _, owner in scope)
+        *(search.fact_search(owner, query, top_k=top_k, query_embedding=query_embedding) for _, owner in scope)
     )
     merged: dict[tuple, dict] = {}
     for (name, _), facts in zip(scope, per_owner):

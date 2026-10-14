@@ -11,6 +11,15 @@ NODE_MATCH_GATE = 0.5
 HOOK_RELEVANCE_GATE = float(os.environ.get("CONTINUUM_HOOK_RELEVANCE_GATE", "0.45"))
 
 
+def above_floor(semantic_rows, floor: float | None) -> list:
+    """Semantic candidates at or above a cosine floor. Nearest-neighbour search
+    always returns *something*; without a floor the tail of an unrelated query
+    rides along into auto-injected context just because it ranked."""
+    if floor is None:
+        return list(semantic_rows)
+    return [r for r in semantic_rows if (r["similarity"] or 0.0) >= floor]
+
+
 def rrf_fuse(ranked_lists, key: str) -> tuple[dict, dict]:
     """Reciprocal-rank-fuse multiple ranked result sets keyed by `key`."""
     scores: dict = {}
@@ -102,13 +111,26 @@ async def is_relevant(owner: str, query_embedding: list[float], gate: float = HO
     return max(memory_score or 0.0, fact_score or 0.0) >= gate
 
 
-async def fact_search(owner: str, query: str, top_k: int = 5) -> list[dict]:
-    query_embedding = await embed(query)
+async def fact_search(
+    owner: str,
+    query: str,
+    top_k: int = 5,
+    *,
+    query_embedding: list[float] | None = None,
+    min_similarity: float | None = None,
+) -> list[dict]:
+    """Hybrid fact search. Pass `query_embedding` when the caller already has
+    one (the hook path embeds once for every owner and channel). With
+    `min_similarity`, semantic hits below that cosine are dropped; lexical hits
+    are exact-term matches and are kept."""
+    if query_embedding is None:
+        query_embedding = await embed(query)
     pool_size = top_k * 3
     async with pg.pool().acquire() as conn:
         semantic = await conn.fetch(
             """
-            SELECT e.id, s.name AS source, e.predicate, t.name AS target, e.fact, e.episode_name
+            SELECT e.id, s.name AS source, e.predicate, t.name AS target, e.fact, e.episode_name,
+                   1 - (e.fact_embedding <=> $2) AS similarity
             FROM entity_edge e
             JOIN entity_node s ON s.id = e.source_id
             JOIN entity_node t ON t.id = e.target_id
@@ -132,7 +154,7 @@ async def fact_search(owner: str, query: str, top_k: int = 5) -> list[dict]:
             owner, query, pool_size,
         )
 
-    scores, rows = rrf_fuse((semantic, lexical), key="id")
+    scores, rows = rrf_fuse((above_floor(semantic, min_similarity), lexical), key="id")
     top = sorted(scores, key=lambda i: scores[i], reverse=True)[:top_k]
     return [
         {

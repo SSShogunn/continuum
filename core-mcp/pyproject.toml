@@ -31,5 +31,6 @@ Repository = "https://github.com/SSShogunn/continuum"
 
 [dependency-groups]
 dev = [
+    "pytest>=9.1.1",
     "watchfiles>=1.2.0",
 ]

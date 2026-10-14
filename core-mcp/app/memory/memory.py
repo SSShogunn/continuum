@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from ..infra import pg
 from . import embeddings, kg
 from .embeddings import embed
-from .search import rrf_fuse
+from .search import above_floor, rrf_fuse
 from .taxonomy import normalize_recall, recall_tier
 
 logger = logging.getLogger("continuum.memory")
@@ -24,8 +24,24 @@ async def save(
     recall: str | None = None,
 ) -> dict:
     tier = normalize_recall(recall, type)
-    embedding = await embed(f"{description}\n\n{content}")
     now = datetime.now(timezone.utc)
+    if not supersedes:
+        current = await get_entry(name, owner=owner)
+        if current and current["archived_at"] is None and (
+            current["type"], current["recall"], current["description"], current["content"]
+        ) == (type, tier, description, content):
+            # Identical re-save (imports, a model re-sending what it read,
+            # session capture restating an entry): nothing to re-embed and no
+            # reason to pay for another LLM graph extraction.
+            return {
+                "name": name,
+                "type": type,
+                "recall": tier,
+                "description": description,
+                "updated_at": current["updated_at"].isoformat(),
+                "unchanged": True,
+            }
+    embedding = await embed(f"{description}\n\n{content}")
     async with pg.pool().acquire() as conn:
         async with conn.transaction():
             await conn.execute(
@@ -62,7 +78,8 @@ async def save(
 async def get_entry(name: str, owner: str = "") -> dict | None:
     async with pg.pool().acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT name, type, recall, description, content FROM memory WHERE owner = $1 AND name = $2",
+            "SELECT name, type, recall, description, content, updated_at, archived_at "
+            "FROM memory WHERE owner = $1 AND name = $2",
             owner, name,
         )
     return dict(row) if row else None
@@ -115,12 +132,20 @@ async def search(
     type: str | None = None,
     owner: str = "",
     recall_in: list[str] | None = None,
+    *,
+    query_embedding: list[float] | None = None,
+    min_similarity: float | None = None,
 ) -> list[dict]:
     """Hybrid (semantic + lexical) memory search. `recall_in` restricts the result
     to given recall tiers — the auto-injection path passes ["relevance"] so
     always-on directives aren't ranked twice and `manual` entries stay opted out;
-    explicit searches leave it unset and see every tier."""
-    query_embedding = await embed(query)
+    explicit searches leave it unset and see every tier.
+
+    `query_embedding` skips re-embedding when the caller already has one;
+    `min_similarity` drops semantic hits below that cosine (lexical hits are
+    exact-term matches and stay)."""
+    if query_embedding is None:
+        query_embedding = await embed(query)
     pool_size = top_k * 4
 
     filters = ["owner = $1", "archived_at IS NULL"]
@@ -137,7 +162,8 @@ async def search(
     async with pg.pool().acquire() as conn:
         semantic = await conn.fetch(
             f"""
-            SELECT name, type, recall, description, content, updated_at
+            SELECT name, type, recall, description, content, updated_at,
+                   1 - (embedding <=> ${n + 1}) AS similarity
             FROM memory
             WHERE {where}
             ORDER BY embedding <=> ${n + 1}
@@ -157,7 +183,7 @@ async def search(
             *params, query, pool_size,
         )
 
-    scores, rows = rrf_fuse((semantic, lexical), key="name")
+    scores, rows = rrf_fuse((above_floor(semantic, min_similarity), lexical), key="name")
 
     now = datetime.now(timezone.utc)
     scored = []
@@ -418,3 +444,18 @@ async def start() -> None:
 
 async def stop() -> None:
     logger.info("Memory store stopped")
+
+
+async def nearest(owner: str, query_embedding: list[float]) -> tuple[str, float] | None:
+    """The single closest active entry by cosine, any recall tier — used to
+    catch a new entry that restates an existing one under a different name."""
+    async with pg.pool().acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT name, 1 - (embedding <=> $2) AS similarity FROM memory
+            WHERE owner = $1 AND archived_at IS NULL
+            ORDER BY embedding <=> $2 LIMIT 1
+            """,
+            owner, query_embedding,
+        )
+    return (row["name"], float(row["similarity"])) if row else None
