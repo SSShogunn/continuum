@@ -319,7 +319,7 @@ export default function StatsPage() {
                             <YAxis hide domain={[0, toolPeak]} />
                             <Tooltip
                               labelFormatter={(d) => (typeof d === "string" ? new Date(d).toLocaleDateString() : d)}
-                              formatter={(value: number) => [value, series.tool]}
+                              formatter={(value) => [Number(value ?? 0), series.tool]}
                               contentStyle={TOOLTIP_CONTENT_STYLE}
                               itemStyle={TOOLTIP_ITEM_STYLE}
                               labelStyle={TOOLTIP_LABEL_STYLE}
