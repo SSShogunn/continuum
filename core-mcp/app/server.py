@@ -90,6 +90,7 @@ _latest_hook_version: str | None = None
 
 async def _poll_revoked_jtis() -> None:
     while True:
+        await auth.flush_token_usage()
         await auth.refresh_revoked_jtis()
         await asyncio.sleep(REVOCATION_POLL_SECONDS)
 
@@ -128,6 +129,7 @@ async def lifespan(server: "FastMCP"):
     finally:
         poll_task.cancel()
         hook_version_task.cancel()
+        await auth.flush_token_usage()
         with contextlib.suppress(asyncio.CancelledError):
             await poll_task
         with contextlib.suppress(asyncio.CancelledError):
@@ -231,8 +233,8 @@ def _script_route(name: str):
     downloads go through GitHub's release CDN rather than raw.githubusercontent.com,
     which rate-limits under load. These URLs stay flat at the root even though
     the files sit in a subdirectory — already-installed hooks fetch their own
-    updates through them. Only the token (from the dashboard's Connections
-    page) is secret, and it never travels through here."""
+    updates through them. Only the hook's credentials are secret, and they
+    never travel through here."""
     base = SCRIPT_RELEASE_BASE if name in BOOTSTRAP_SCRIPTS else PAYLOAD_RELEASE_BASE
 
     async def serve_script(request: Request) -> Response:
@@ -307,8 +309,14 @@ async def oauth_discovery(request: Request) -> Response:
             "authorization_endpoint": f"{backend}/oauth/authorize",
             "token_endpoint": f"{backend}/oauth/token",
             "registration_endpoint": f"{backend}/oauth/register",
+            "device_authorization_endpoint": f"{backend}/oauth/device_authorization",
+            "revocation_endpoint": f"{backend}/oauth/revoke",
             "response_types_supported": ["code"],
-            "grant_types_supported": ["authorization_code"],
+            "grant_types_supported": [
+                "authorization_code",
+                "urn:ietf:params:oauth:grant-type:device_code",
+                "refresh_token",
+            ],
             "code_challenge_methods_supported": ["S256"],
             "token_endpoint_auth_methods_supported": ["none"],
             "scopes_supported": ["mcp"],

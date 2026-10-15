@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 
 import httpx
 from fastmcp.server.auth.providers.jwt import JWTVerifier
@@ -14,6 +15,7 @@ logger = logging.getLogger("continuum.auth")
 # dashboard actually take effect — plain JWT signature validation alone
 # accepts a revoked token forever.
 _revoked_jtis: set[str] = set()
+_last_used: dict[str, int] = {}
 
 
 class RevocationAwareJWTVerifier(JWTVerifier):
@@ -24,6 +26,8 @@ class RevocationAwareJWTVerifier(JWTVerifier):
         jti = access_token.claims.get("jti")
         if jti and jti in _revoked_jtis:
             return None
+        if jti:
+            _last_used[jti] = int(time.time())
         return access_token
 
 
@@ -55,6 +59,27 @@ async def refresh_revoked_jtis() -> None:
         return
     _revoked_jtis.clear()
     _revoked_jtis.update(jtis)
+
+
+async def flush_token_usage() -> None:
+    backend = os.environ.get("CONTINUUM_BACKEND_PUBLIC_URL", "").rstrip("/")
+    secret = os.environ.get("CONTINUUM_INTERNAL_SECRET", "")
+    if not backend or not secret or not _last_used:
+        return
+    batch = dict(_last_used)
+    _last_used.clear()
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                f"{backend}/internal/token-usage",
+                headers={"X-Internal-Secret": secret},
+                json={"usage": batch},
+            )
+            response.raise_for_status()
+    except httpx.HTTPError as exc:
+        for jti, seen in batch.items():
+            _last_used[jti] = max(seen, _last_used.get(jti, 0))
+        logger.warning("Failed to report token usage: %r", exc)
 
 
 def current_owner() -> str | None:
