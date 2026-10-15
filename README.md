@@ -22,17 +22,20 @@ Use the hosted instance — no setup required:
    automatically (no tool call needed) and durable facts from your sessions are saved for you:
    ```bash
    # macOS / Linux / WSL / Git Bash
-   curl -fsSL https://continuum-mcp.sshogunn.org/install_hook.js | CONTINUUM_TOKEN=<token> node
+   curl -fsSL https://continuum-mcp.sshogunn.org/install_hook.js | node
    ```
    ```powershell
    # Windows PowerShell
-   $env:CONTINUUM_TOKEN="<token>"; irm https://continuum-mcp.sshogunn.org/install_hook.js | node -
+   irm https://continuum-mcp.sshogunn.org/install_hook.js | node -
    ```
-   Get `<token>` from the dashboard's Connections page. Needs Node 18+ on `PATH` (same
-   requirement as Claude Code itself).
+   The installer prints a short code and opens the dashboard's `/device` page — approve it
+   there and the install finishes on its own. Each machine gets its own session (a 1-hour
+   access token plus a refresh token the hooks rotate automatically), listed under
+   Connections → Signed-in devices where you can sign it out. Needs Node 18+ on `PATH`
+   (same requirement as Claude Code itself). On a machine with no browser, generate a token
+   on the Connections page and pass it as `CONTINUUM_TOKEN=<token>` instead.
 
-Both connect paths go through OAuth — no token to copy/paste there. The manual token above is
-just for the hook script, which has no browser to complete OAuth with.
+Both connect paths go through OAuth — no token to copy/paste anywhere.
 
 Prefer to run your own instance? See [Self-hosting](#self-hosting).
 
