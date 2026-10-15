@@ -3,31 +3,22 @@ import contextlib
 import json
 import logging
 import os
-import re
 import signal
 import time
 from datetime import datetime, timezone
-from typing import Any
 from . import auth
-from .infra import browser_pool, db, pg
+from .infra import db, pg
 from .infra import redis as redis_infra
 from .memory import kg, memory, prompt, search, taxonomy
 from .memory.embeddings import embed
 from .memory.hook_session import HookSession
-import html2text
 import httpx
-import litellm
-import trafilatura
-from rapidfuzz import fuzz
 from dotenv import load_dotenv
 from pathlib import Path
 from contextlib import asynccontextmanager
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from fastmcp.server.middleware import Middleware, MiddlewareContext
-from fastmcp.utilities.types import Image
-from playwright.async_api import Error as PlaywrightError
-from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from mcp.types import Icon
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
@@ -62,15 +53,6 @@ PAYLOAD_SCRIPTS = (
 )
 PUBLIC_SCRIPTS = BOOTSTRAP_SCRIPTS + PAYLOAD_SCRIPTS
 
-DEFAULT_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/126.0.0.0 Safari/537.36"
-)
-
-HTTP2_ERROR_MARKERS = ("ERR_HTTP2_PROTOCOL_ERROR", "ERR_HTTP2", "ERR_CONNECTION_RESET")
-
-SEARXNG_URL = os.environ.get("CONTINUUM_SEARXNG_URL", "http://searxng:8080")
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
@@ -116,7 +98,6 @@ async def _poll_latest_hook_version() -> None:
 
 @asynccontextmanager
 async def lifespan(server: "FastMCP"):
-    await browser_pool.start()
     await pg.start()
     await redis_infra.start()
     await db.start()
@@ -138,7 +119,6 @@ async def lifespan(server: "FastMCP"):
         await db.stop()
         await redis_infra.stop()
         await pg.stop()
-        await browser_pool.stop()
 
 
 class RequestLoggingMiddleware(Middleware):
@@ -176,8 +156,8 @@ Memories are scoped to the caller's account alone. Auto-saving without asking is
 
 ## Memory rules
 
-1. **Search proactively** — every conversation, every new topic. `memory_fact_search` for narrow
-   lookups; `memory_list` first for "what do you remember?".
+1. **Search proactively** — every conversation, every new topic. `memory_search` returns matching
+   memories and facts; `memory_list` first for "what do you remember?".
 
 2. **Workspace = project. Never land on `default` by omission.** Anything tied to a specific
    codebase or project (status, decisions, bugs, task context) MUST pass an explicit `workspace`:
@@ -196,7 +176,7 @@ Memories are scoped to the caller's account alone. Auto-saving without asking is
 4. **Save at boundaries, batched** — not mid-stream; one call per topic/entity, `content` lean.
 
 5. **Update, don't duplicate.** Reuse a `name` to overwrite, `supersedes=["old"]` when replacing a
-   differently-named entry, `memory_append` to add a line. Names: kebab-case, descriptive.
+   differently-named entry, `memory_save` with `append` to add a line. Names: kebab-case, descriptive.
 """.strip()
 
 _jwt_verifier = auth.build_verifier()
@@ -754,363 +734,6 @@ async def _redirect(request: Request) -> Response:
 mcp.custom_route("/", methods=["GET"])(_redirect)
 
 
-def _image_format_from_content_type(content_type: str) -> str:
-    subtype = content_type.split(";", 1)[0].strip().lower()
-    fmt = subtype.split("/", 1)[1] if "/" in subtype else subtype
-    if fmt in ("jpg", "jpeg"):
-        return "jpeg"
-    if fmt == "svg+xml":
-        return "svg+xml"
-    return fmt or "png"
-
-
-def _is_http2_error(exc: Exception) -> bool:
-    message = str(exc)
-    return any(marker in message for marker in HTTP2_ERROR_MARKERS)
-
-
-def _concise_error(exc: Exception) -> str:
-    text = str(exc)
-    match = re.search(r"net::ERR_[A-Z0-9_]+", text)
-    if match:
-        return match.group(0)
-    if isinstance(exc, PlaywrightTimeoutError):
-        return "navigation timed out"
-    first_line = next((line for line in text.splitlines() if line.strip()), "")
-    return (first_line.strip() or exc.__class__.__name__)[:200]
-
-
-@asynccontextmanager
-async def _navigated_page(url: str, timeout_ms: int, engine: str):
-    async with browser_pool.page(engine) as page:
-        try:
-            await page.goto(url, wait_until="networkidle", timeout=timeout_ms)
-        except PlaywrightTimeoutError:
-            logger.info(
-                "networkidle timed out for %s on %s; using current page state",
-                url,
-                engine,
-            )
-        yield page
-
-
-async def _goto_and_extract(
-    url: str, wait_for_selector: str | None, timeout_ms: int, engine: str
-) -> tuple[str, str]:
-    async with _navigated_page(url, timeout_ms, engine) as page:
-        if wait_for_selector:
-            await page.wait_for_selector(wait_for_selector, timeout=timeout_ms)
-        return await page.content(), await page.title()
-
-
-async def _goto_and_screenshot(
-    url: str, full_page: bool, timeout_ms: int, engine: str
-) -> bytes:
-    async with _navigated_page(url, timeout_ms, engine) as page:
-        return await page.screenshot(full_page=full_page, type="png")
-
-
-async def _with_engine_fallback(run):
-    try:
-        return await run("chromium")
-    except PlaywrightError as exc:
-        if not _is_http2_error(exc):
-            raise
-        logger.info(
-            "Chromium navigation failed (%s); retrying with Firefox",
-            _concise_error(exc),
-        )
-        return await run("firefox")
-
-
-def _to_markdown(html: str) -> str:
-    converter = html2text.HTML2Text()
-    converter.body_width = 0
-    converter.ignore_links = False
-    converter.ignore_images = False
-    return converter.handle(html)
-
-
-@mcp.tool
-async def fetch_page(
-    url: str,
-    wait_for_selector: str | None = None,
-    timeout_ms: int = 15000,
-    readability: bool = False,
-) -> str:
-    """Fetch a web page with a headless browser and return its content as markdown. Set readability=True to strip nav/sidebars and return only the main content."""
-    try:
-        html, title = await _with_engine_fallback(
-            lambda engine: _goto_and_extract(url, wait_for_selector, timeout_ms, engine)
-        )
-    except PlaywrightError as exc:
-        raise ToolError(f"Failed to load {url}: {_concise_error(exc)}")
-
-    if readability:
-        extracted = trafilatura.extract(
-            html,
-            url=url,
-            output_format="markdown",
-            include_links=True,
-            include_images=True,
-            favor_recall=True,
-        )
-        markdown = extracted or _to_markdown(html)
-    else:
-        markdown = _to_markdown(html)
-
-    return f"# {title}\n\nSource: {url}\n\n{markdown}"
-
-
-@mcp.tool
-async def fetch_pages(
-    urls: list[str],
-    wait_for_selector: str | None = None,
-    timeout_ms: int = 15000,
-    readability: bool = False,
-) -> str:
-    """Fetch multiple web pages concurrently and return all results as markdown, separated by ---."""
-
-    async def _one(url: str) -> str:
-        try:
-            html, title = await _with_engine_fallback(
-                lambda engine: _goto_and_extract(
-                    url, wait_for_selector, timeout_ms, engine
-                )
-            )
-            if readability:
-                extracted = trafilatura.extract(
-                    html,
-                    url=url,
-                    output_format="markdown",
-                    include_links=True,
-                    include_images=True,
-                    favor_recall=True,
-                )
-                markdown = extracted or _to_markdown(html)
-            else:
-                markdown = _to_markdown(html)
-            return f"# {title}\n\nSource: {url}\n\n{markdown}"
-        except Exception as exc:
-            reason = (
-                _concise_error(exc) if isinstance(exc, PlaywrightError) else str(exc)
-            )
-            return f"Source: {url}\n\nError: {reason}"
-
-    results = await asyncio.gather(*[_one(url) for url in urls])
-    return "\n\n---\n\n".join(results)
-
-
-@mcp.tool
-async def screenshot_page(
-    url: str,
-    full_page: bool = False,
-    timeout_ms: int = 15000,
-) -> Image:
-    """Capture a PNG screenshot of a web page in a 1280x800 viewport."""
-    try:
-        data = await _with_engine_fallback(
-            lambda engine: _goto_and_screenshot(url, full_page, timeout_ms, engine)
-        )
-    except PlaywrightError as exc:
-        raise ToolError(f"Failed to load {url}: {_concise_error(exc)}")
-
-    return Image(data=data, format="png")
-
-
-@mcp.tool
-async def fetch_image(image_url: str, referer: str | None = None) -> Image:
-    """Download an image over HTTP with a desktop browser User-Agent and optional Referer."""
-    headers = {"User-Agent": DEFAULT_USER_AGENT}
-    if referer:
-        headers["Referer"] = referer
-
-    async with httpx.AsyncClient(follow_redirects=True) as client:
-        response = await client.get(image_url, headers=headers, timeout=15.0)
-        response.raise_for_status()
-
-    content_type = response.headers.get("content-type", "image/png")
-    fmt = _image_format_from_content_type(content_type)
-
-    return Image(data=response.content, format=fmt)
-
-
-async def _searxng_search(query: str, count: int) -> list[dict]:
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            f"{SEARXNG_URL}/search",
-            params={"q": query, "format": "json"},
-            timeout=15.0,
-        )
-    response.raise_for_status()
-
-    results = response.json().get("results", [])
-    return [
-        {
-            "title": r.get("title", ""),
-            "url": r.get("url", ""),
-            "snippet": " ".join(r.get("content", "").split()),  # collapse whitespace/newlines SearXNG sometimes includes
-            "published": r.get("publishedDate") or "",
-        }
-        for r in results[:count]
-    ]
-
-
-@mcp.tool
-async def search_web(query: str, count: int = 5) -> str:
-    """Search the web via a self-hosted SearXNG instance and return structured results (title, URL, snippet, published date). Use fetch_page on a specific URL for full content."""
-    results = await _searxng_search(query, count)
-
-    if not results:
-        return "No results found."
-
-    lines = [
-        f"{i}. {r['title']}\n   {r['url']}\n   {r['snippet']}" + (f" ({r['published']})" if r["published"] else "")
-        for i, r in enumerate(results, 1)
-    ]
-    return "\n".join(lines)
-
-
-@mcp.tool
-async def extract_structured(
-    url: str,
-    schema: str,
-    timeout_ms: int = 15000,
-) -> str:
-    """Fetch a URL and extract structured JSON data from its content. `schema` describes the
-    fields wanted — either a JSON Schema string or a plain-language description (e.g. "title,
-    author, published date, and a list of section headings"). Returns the extracted JSON as a
-    string. Best for turning an article, listing, or product page into structured data."""
-    try:
-        html, _ = await _with_engine_fallback(
-            lambda engine: _goto_and_extract(url, None, timeout_ms, engine)
-        )
-    except PlaywrightError as exc:
-        raise ToolError(f"Failed to load {url}: {_concise_error(exc)}")
-
-    text = trafilatura.extract(
-        html, url=url, output_format="markdown", favor_recall=True
-    ) or _to_markdown(html)
-
-    model = os.environ.get("CONTINUUM_EXTRACT_MODEL", "openai/gpt-5.4-mini")
-    api_key = os.environ.get("CONTINUUM_EXTRACT_API_KEY", "")
-    kwargs: dict[str, Any] = {"api_key": api_key} if api_key else {}
-
-    response = await litellm.acompletion(
-        model=model,
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    "Extract structured data from the page content below, matching this "
-                    f"schema exactly:\n\n{schema}\n\n"
-                    "Respond with ONLY a JSON object — no explanation, no markdown fences.\n\n"
-                    f"Page content:\n\n{text[:20000]}"
-                ),
-            }
-        ],
-        response_format={"type": "json_object"},
-        **kwargs,
-    )
-    if not isinstance(response, litellm.ModelResponse):
-        raise ToolError("Unexpected streaming response from model.")
-    raw = response.choices[0].message.content
-    if raw is None:
-        raise ToolError("Model returned no content.")
-
-    try:
-        json.loads(raw)
-    except json.JSONDecodeError:
-        raise ToolError(f"Model did not return valid JSON: {raw[:500]}")
-    return raw
-
-
-async def _check_one_url(url: str) -> dict:
-    async with httpx.AsyncClient(follow_redirects=True, timeout=10.0) as client:
-        try:
-            response = await client.head(url, headers={"User-Agent": DEFAULT_USER_AGENT})
-            if response.status_code in (405, 501):
-                response = await client.get(url, headers={"User-Agent": DEFAULT_USER_AGENT})
-        except httpx.ConnectError as exc:
-            return {"url": url, "resolved": False, "error": f"connection failed: {exc}"}
-        except httpx.TimeoutException:
-            return {"url": url, "resolved": False, "error": "timed out"}
-        except httpx.HTTPError as exc:
-            return {"url": url, "resolved": False, "error": str(exc)}
-
-    redirect_chain = [str(r.url) for r in response.history]
-    return {
-        "url": url,
-        "resolved": True,
-        "status_code": response.status_code,
-        "final_url": str(response.url),
-        "redirected": str(response.url) != url,
-        "redirect_chain": redirect_chain,
-        "content_type": response.headers.get("content-type", ""),
-    }
-
-
-@mcp.tool
-async def check_url(url: str) -> str:
-    """Verify whether a URL actually resolves (catches dead links, typos, and hallucinated URLs). Reports status code, whether it redirected, the final URL, and content type."""
-    result = await _check_one_url(url)
-    if not result["resolved"]:
-        return f"UNRESOLVED: {url}\nError: {result['error']}"
-
-    lines = [f"Status: {result['status_code']}", f"Content-Type: {result['content_type'] or 'unknown'}"]
-    if result["redirected"]:
-        lines.append(f"Redirected to: {result['final_url']}")
-        if result["redirect_chain"]:
-            lines.append(f"Redirect chain: {' -> '.join(result['redirect_chain'] + [result['final_url']])}")
-    ok = 200 <= result["status_code"] < 400
-    return f"{'RESOLVED' if ok else 'ERROR RESPONSE'}: {url}\n" + "\n".join(lines)
-
-
-def _normalize_text(s: str) -> str:
-    return re.sub(r"\s+", " ", s).strip()
-
-
-@mcp.tool
-async def verify_quote(url: str, quote: str, context_chars: int = 200) -> str:
-    """Check whether a quoted string actually appears verbatim on a page — use this before presenting a quote/citation as fact to catch fabricated or misremembered quotes. Returns an exact match, or the closest matching passage with a similarity score if no exact match exists."""
-    try:
-        html, title = await _with_engine_fallback(
-            lambda engine: _goto_and_extract(url, None, 15000, engine)
-        )
-    except PlaywrightError as exc:
-        raise ToolError(f"Failed to load {url}: {_concise_error(exc)}")
-
-    page_text = trafilatura.extract(html, url=url, output_format="txt", favor_recall=True) or _to_markdown(html)
-    haystack = _normalize_text(page_text)
-    needle = _normalize_text(quote)
-
-    if not needle:
-        raise ToolError("quote is empty after normalization.")
-
-    idx = haystack.lower().find(needle.lower())
-    if idx != -1:
-        start = max(0, idx - context_chars)
-        end = min(len(haystack), idx + len(needle) + context_chars)
-        return (
-            f"VERIFIED: exact match found on \"{title}\" ({url})\n\n"
-            f"...{haystack[start:end]}..."
-        )
-
-    alignment = fuzz.partial_ratio_alignment(needle.lower(), haystack.lower())
-    if alignment is None or alignment.score == 0:
-        return f"NOT FOUND: no resemblance to this quote on \"{title}\" ({url})"
-
-    window_start = max(0, alignment.dest_start - context_chars)
-    window_end = min(len(haystack), alignment.dest_end + context_chars)
-    window = haystack[window_start:window_end]
-    score = alignment.score / 100
-
-    return (
-        f"NO EXACT MATCH (similarity={score:.2f}) on \"{title}\" ({url})\n\n"
-        f"Closest passage:\n...{window}..."
-    )
-
-
 def _read_scope(workspace: str) -> list[tuple[str, str]]:
     scope = [(workspace, auth.scoped_owner(workspace))]
     if workspace != "default":
@@ -1121,15 +744,35 @@ def _read_scope(workspace: str) -> list[tuple[str, str]]:
 @mcp.tool
 async def memory_save(
     name: str,
-    type: str,
-    description: str,
-    content: str,
+    content: str | None = None,
+    type: str | None = None,
+    description: str | None = None,
+    append: str | None = None,
     workspace: str = "default",
     supersedes: list[str] | None = None,
     recall: str | None = None,
 ) -> str:
-    """Save or update a persistent memory entry (e.g. facts about the user, their preferences, or ongoing project context) so it can be recalled later across sessions via memory_search. `name` is a unique slug — saving again with the same name overwrites the existing entry. `type` categorizes the subject (e.g. user, preference, project, reference). `recall` controls delivery, independently of `type`: "always" for a standing behavioral rule that must be injected into every message regardless of topic ("never do X unless asked"), "relevance" (the default) for contextual facts surfaced only when the message is semantically close, "manual" for bulky material that should never be auto-injected. `workspace` namespaces the entry. It defaults to "default", but do NOT rely on that default for project work: anything tied to a specific codebase or project (its status, decisions, bugs, task context) must pass an explicit kebab-cased slug derived from that project's repo/directory name. Call `memory_list_workspaces` first and reuse an existing close match rather than minting a near-duplicate; if no workspace fits the current project, ask the user which to create instead of silently writing to "default". Reserve "default" for what spans every project — the user's identity, cross-project preferences, people. `supersedes` is a list of existing memory names that this entry replaces — they get archived (hidden from search/list, not deleted) instead of left to compete on similarity forever."""
+    """Save or update a persistent memory entry (e.g. facts about the user, their preferences, or ongoing project context) so it can be recalled later across sessions via memory_search. `name` is a unique slug — saving again with the same name overwrites the existing entry. `type` categorizes the subject (e.g. user, preference, project, reference). `recall` controls delivery, independently of `type`: "always" for a standing behavioral rule that must be injected into every message regardless of topic ("never do X unless asked"), "relevance" (the default) for contextual facts surfaced only when the message is semantically close, "manual" for bulky material that should never be auto-injected. `workspace` namespaces the entry. It defaults to "default", but do NOT rely on that default for project work: anything tied to a specific codebase or project (its status, decisions, bugs, task context) must pass an explicit kebab-cased slug derived from that project's repo/directory name. Call `memory_list_workspaces` first and reuse an existing close match rather than minting a near-duplicate; if no workspace fits the current project, ask the user which to create instead of silently writing to "default". Reserve "default" for what spans every project — the user's identity, cross-project preferences, people. `supersedes` is a list of existing memory names that this entry replaces — they get archived (hidden from search/list, not deleted) instead of left to compete on similarity forever. To change an existing entry without resending it, omit `content` and pass `append` (text added to the end of its content — safer than reproducing a long body to add one line) and/or `recall` (moves it to another tier)."""
     owner = auth.scoped_owner(workspace)
+    if content is None:
+        if append is None and recall is None:
+            raise ToolError("Pass `content` to save an entry, or `append`/`recall` to update an existing one.")
+        if append is not None and await memory.append(name, append, owner=owner) is None:
+            raise ToolError(
+                f"No memory entry named '{name}' in workspace '{workspace}' — pass `content`, `type` and `description` to create it."
+            )
+        if recall is not None:
+            try:
+                tier = await memory.set_recall(name, recall, owner=owner)
+            except ValueError as exc:
+                raise ToolError(str(exc))
+            if tier is None:
+                raise ToolError(f"No memory entry named '{name}' in workspace '{workspace}'.")
+        return f"Updated memory '{name}'."
+    if append is not None:
+        raise ToolError("Pass either `content` or `append`, not both.")
+    if not type or not description:
+        raise ToolError("`type` and `description` are required when saving `content`.")
     record = await memory.save(
         name, type, description, content, owner=owner, supersedes=supersedes, recall=recall
     )
@@ -1140,7 +783,7 @@ async def memory_save(
 
 @mcp.tool
 async def memory_search(query: str, top_k: int = 5, type: str | None = None, workspace: str = "default") -> str:
-    """Semantically search saved memory entries and return the most relevant ones with their full content. Optionally filter by `type`. `workspace` scopes the search and defaults to "default"; passing a project workspace searches that workspace AND "default" together, so project-scoped work still sees identity, preferences, and standing rules. Each result is labelled with the workspace it came from.
+    """Semantically search saved memory entries and return the most relevant ones with their full content. Optionally filter by `type`. `workspace` scopes the search and defaults to "default"; passing a project workspace searches that workspace AND "default" together, so project-scoped work still sees identity, preferences, and standing rules. Each result is labelled with the workspace it came from. Matching knowledge-graph facts (single typed relationships between entities, outdated ones excluded) are listed after the memories — often enough on their own for a narrow question like a config value, decision or status.
 
     Call this proactively, not just at the start of a conversation — any time the current message
     references something that might already be known: a named project/machine/person, "my setup",
@@ -1149,76 +792,49 @@ async def memory_search(query: str, top_k: int = 5, type: str | None = None, wor
     nothing, and expensive to silently re-ask the user for facts they already gave you."""
     scope = _read_scope(workspace)
     query_embedding = await embed(query)
-    per_owner = await asyncio.gather(
-        *(
-            memory.search(query, top_k=top_k, type=type, owner=owner, query_embedding=query_embedding)
-            for _, owner in scope
-        )
+    per_owner, facts_per_owner = await asyncio.gather(
+        asyncio.gather(
+            *(
+                memory.search(query, top_k=top_k, type=type, owner=owner, query_embedding=query_embedding)
+                for _, owner in scope
+            )
+        ),
+        asyncio.gather(
+            *(search.fact_search(owner, query, top_k=top_k, query_embedding=query_embedding) for _, owner in scope)
+        ),
     )
     merged: dict[str, dict] = {}
     for (name, _), entries in zip(scope, per_owner):
         for entry in entries:
             merged.setdefault(entry["name"], {**entry, "workspace": name})
     results = sorted(merged.values(), key=lambda e: e["score"], reverse=True)[:top_k]
+    merged_facts: dict[tuple, dict] = {}
+    for (name, _), facts in zip(scope, facts_per_owner):
+        for fact in facts:
+            key = (fact["source"], fact["predicate"], fact["target"], fact["fact"])
+            merged_facts.setdefault(key, {**fact, "workspace": name})
+    facts = sorted(merged_facts.values(), key=lambda f: f["score"], reverse=True)[:top_k]
     nudge = await _hook_nudge(auth.current_owner() or "")
-    if not results:
+    if not results and not facts:
         return "No memory entries found." + nudge
     blocks = [
         f"## {r['name']} (workspace={r['workspace']}, type={r['type']}, recall={r['recall']}, score={r['score']:.3f})\n{r['description']}\n\n{r['content']}"
         for r in results
     ]
+    if facts:
+        blocks.append(
+            "## Related facts\n"
+            + "\n".join(
+                f"- [{f['workspace']}] {f['source']} {f['predicate']} {f['target']}: {f['fact']} (from {f['episode_name']})"
+                for f in facts
+            )
+        )
     return "\n\n---\n\n".join(blocks) + nudge
 
 
 @mcp.tool
-async def memory_fact_search(query: str, top_k: int = 5, workspace: str = "default") -> str:
-    """Semantically search facts in the knowledge graph — more precise than memory_search for narrow questions, since each fact is a single typed relationship between two entities rather than a full memory blob. Superseded (outdated) facts are excluded. `workspace` scopes the search and defaults to "default"; passing a project workspace searches that workspace AND "default" together, so project-scoped work still sees cross-project facts.
-
-    Reach for this over memory_search when the question is narrow and factual (a specific config
-    value, IP, decision, or status) rather than "tell me everything about X" — it returns just the
-    matching facts instead of whole memory blobs, so it's the cheaper first call for a pointed
-    question."""
-    scope = _read_scope(workspace)
-    query_embedding = await embed(query)
-    per_owner = await asyncio.gather(
-        *(search.fact_search(owner, query, top_k=top_k, query_embedding=query_embedding) for _, owner in scope)
-    )
-    merged: dict[tuple, dict] = {}
-    for (name, _), facts in zip(scope, per_owner):
-        for fact in facts:
-            key = (fact["source"], fact["predicate"], fact["target"], fact["fact"])
-            merged.setdefault(key, {**fact, "workspace": name})
-    results = sorted(merged.values(), key=lambda f: f["score"], reverse=True)[:top_k]
-    if not results:
-        return "No facts found."
-    return "\n".join(
-        f"- [{r['workspace']}] {r['source']} {r['predicate']} {r['target']}: {r['fact']} (from {r['episode_name']})"
-        for r in results
-    )
-
-
-@mcp.tool
-async def memory_graph_search(entity: str, workspace: str = "default") -> str:
-    """Look up an entity in the knowledge graph and return everything currently known about it — its type, a summary, and all its live relationships to other entities. Best for "what do you know about X". Superseded facts are excluded. `workspace` scopes the search — defaults to "default"."""
-    owner = auth.scoped_owner(workspace)
-    result = await search.graph_search(owner, entity)
-    if result is None:
-        return "No entity found matching that name."
-    node = result["node"]
-    lines = [f"{node['name']} ({node['type']})" + (f": {node['summary']}" if node["summary"] else "")]
-    if not result["edges"]:
-        lines.append("(no current relationships)")
-    for e in result["edges"]:
-        if e["outgoing"]:
-            lines.append(f"- {e['predicate']} → {e['target']}: {e['fact']} (from {e['episode_name']})")
-        else:
-            lines.append(f"- {e['source']} {e['predicate']} → (this): {e['fact']} (from {e['episode_name']})")
-    return "\n".join(lines)
-
-
-@mcp.tool
 async def memory_list(type: str | None = None, workspace: str = "default", include_archived: bool = False) -> str:
-    """List all saved memory entries (name, type, recall tier, description, last updated) without their full content. Optionally filter by `type`. `workspace` scopes the listing and defaults to "default"; passing a project workspace lists that workspace AND "default" together, each entry labelled with the workspace it lives in. Set `include_archived=True` to also show entries archived via `supersedes` or `memory_archive`."""
+    """List all saved memory entries (name, type, recall tier, description, last updated) without their full content. Optionally filter by `type`. `workspace` scopes the listing and defaults to "default"; passing a project workspace lists that workspace AND "default" together, each entry labelled with the workspace it lives in. Set `include_archived=True` to also show entries archived via `supersedes`."""
     scope = _read_scope(workspace)
     per_owner = await asyncio.gather(
         *(
@@ -1243,31 +859,6 @@ async def memory_list(type: str | None = None, workspace: str = "default", inclu
 
 
 @mcp.tool
-async def memory_append(name: str, text: str, workspace: str = "default") -> str:
-    """Add a line or two to an existing memory entry without resending its whole body. Prefer this over `memory_save` when you are adding a fact to something that already exists — re-sending the full `content` to append one line risks silently dropping the rest of it. The entry is re-embedded and re-indexed exactly as a full save would be. `workspace` scopes the lookup — defaults to "default"."""
-    owner = auth.scoped_owner(workspace)
-    record = await memory.append(name, text, owner=owner)
-    if record is None:
-        raise ToolError(
-            f"No memory entry named '{name}' in workspace '{workspace}' — use memory_save to create it."
-        )
-    return f"Appended to memory '{name}'."
-
-
-@mcp.tool
-async def memory_set_recall(name: str, recall: str, workspace: str = "default") -> str:
-    """Move an existing memory between recall tiers without rewriting it — "always" (a standing rule injected into every message regardless of topic), "relevance" (the default; surfaced only when the current message is semantically close), or "manual" (never auto-injected, only returned by an explicit search). Use this when an entry was filed at the wrong tier — e.g. a standing rule saved as an ordinary preference that therefore only surfaces by luck. `workspace` scopes the lookup — defaults to "default"."""
-    owner = auth.scoped_owner(workspace)
-    try:
-        tier = await memory.set_recall(name, recall, owner=owner)
-    except ValueError as exc:
-        raise ToolError(str(exc))
-    if tier is None:
-        raise ToolError(f"No memory entry named '{name}' in workspace '{workspace}'.")
-    return f"Memory '{name}' now has recall={tier}."
-
-
-@mcp.tool
 async def memory_delete(name: str, workspace: str = "default") -> str:
     """Delete a saved memory entry by name. `workspace` scopes the lookup — defaults to "default"."""
     owner = auth.scoped_owner(workspace)
@@ -1278,107 +869,11 @@ async def memory_delete(name: str, workspace: str = "default") -> str:
 
 
 @mcp.tool
-async def memory_archive(name: str, workspace: str = "default") -> str:
-    """Archive a memory entry by name — hides it from memory_search and memory_list (default), without deleting it. Use memory_restore to undo. `workspace` scopes the lookup — defaults to "default"."""
-    owner = auth.scoped_owner(workspace)
-    archived = await memory.archive(name, owner=owner)
-    if not archived:
-        raise ToolError(f"No active memory entry named '{name}' found.")
-    return f"Archived memory '{name}'."
-
-
-@mcp.tool
-async def memory_restore(name: str, workspace: str = "default") -> str:
-    """Restore a previously archived memory entry by name, making it visible again in memory_search and memory_list. `workspace` scopes the lookup — defaults to "default"."""
-    owner = auth.scoped_owner(workspace)
-    restored = await memory.restore(name, owner=owner)
-    if not restored:
-        raise ToolError(f"No archived memory entry named '{name}' found.")
-    return f"Restored memory '{name}'."
-
-
-@mcp.tool
 async def memory_list_workspaces() -> str:
     """List all workspaces that exist for the current account."""
     clerk_id = auth.current_owner()
     workspaces = await memory.list_workspaces(clerk_id)
     return "\n".join(f"- {w}" for w in workspaces)
-
-
-EXPORT_FORMAT = "continuum-memory-export"
-EXPORT_VERSION = "1"
-
-
-@mcp.tool
-async def memory_export(workspace: str = "default") -> str:
-    """Export every memory entry in a workspace (including archived ones) as a portable JSON
-    document, so it can be backed up or loaded into another tool. `workspace` scopes the export —
-    defaults to "default".
-
-    Whenever the user wants to back up, migrate, or move memories between workspaces, accounts, or
-    tools, reach for this plus `memory_import` — do NOT hand-re-save each entry with `memory_save`.
-    Manual re-saving silently loses `recall`, `type`, and timestamps, drops archived entries
-    entirely, and risks corrupting long bodies you reproduce from context. To move entries between
-    workspaces: `memory_export` the source, then `memory_import` that JSON with the destination
-    `workspace`, then delete the originals once you have confirmed the copies landed."""
-    owner = auth.scoped_owner(workspace)
-    entries = await memory.list_full(owner=owner)
-    payload = {
-        "format": EXPORT_FORMAT,
-        "version": EXPORT_VERSION,
-        "exported_at": datetime.now(timezone.utc).isoformat(),
-        "workspace": workspace,
-        "memories": entries,
-    }
-    return json.dumps(payload, indent=2)
-
-
-@mcp.tool
-async def memory_import(data: str, workspace: str = "default") -> str:
-    """Import memory entries from a JSON export into `workspace` (defaults to "default"). Accepts
-    Continuum's own export format (an object with a `memories` array, as produced by
-    `memory_export`) or a plain JSON array of objects with at least `name` and `content` — so
-    exports from other memory tools can be adapted with minimal reshaping. Entries reuse `name` as
-    the unique key, so importing overwrites an existing entry with the same name (and unarchives
-    it) rather than duplicating it.
-
-    This is the correct way to move memories into a project workspace — pair it with
-    `memory_export` rather than re-saving each entry by hand, which loses metadata and archived
-    entries."""
-    owner = auth.scoped_owner(workspace)
-    try:
-        parsed = json.loads(data)
-    except json.JSONDecodeError as exc:
-        raise ToolError(f"Invalid JSON: {exc}")
-
-    if isinstance(parsed, dict) and isinstance(parsed.get("memories"), list):
-        raw_entries = parsed["memories"]
-    elif isinstance(parsed, list):
-        raw_entries = parsed
-    else:
-        raise ToolError("Expected a JSON array of memories, or an object with a 'memories' array.")
-
-    imported = 0
-    skipped: list[str] = []
-    for i, entry in enumerate(raw_entries):
-        if not isinstance(entry, dict) or not entry.get("name") or not entry.get("content"):
-            skipped.append(entry.get("name") if isinstance(entry, dict) and entry.get("name") else f"#{i}")
-            continue
-        content = entry["content"]
-        await memory.save(
-            entry["name"],
-            entry.get("type") or "imported",
-            entry.get("description") or content[:200],
-            content,
-            owner=owner,
-            recall=entry.get("recall"),
-        )
-        imported += 1
-
-    summary = f"Imported {imported} memory entr{'y' if imported == 1 else 'ies'} into workspace '{workspace}'."
-    if skipped:
-        summary += f" Skipped {len(skipped)} invalid entries (missing name/content): {', '.join(skipped[:10])}"
-    return summary
 
 
 @mcp.resource("memory://context")

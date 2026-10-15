@@ -201,7 +201,7 @@ async def build_hook_context(
     surfaces as a bare title isn't actionable. `recall="relevance"` entries are
     contextual facts — gated, ranked, and listed lean (names/descriptions and fact
     lines) because they ride on every message and the model can call
-    memory_search/memory_fact_search itself for detail. `recall="manual"` entries
+    memory_search itself for detail. `recall="manual"` entries
     never appear here at all.
 
     With a `session` (hooks that send a session id), nothing is repeated that
@@ -339,7 +339,7 @@ async def build_hook_context(
                 )
             )
         related.append(
-            f'(call memory_search / memory_fact_search with workspace="{workspace}" '
+            f'(call memory_search with workspace="{workspace}" '
             "for full detail if needed)"
         )
         parts.append("\n\n".join(related))

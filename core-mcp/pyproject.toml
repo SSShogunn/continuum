@@ -12,17 +12,13 @@ dependencies = [
     "fastapi>=0.141.1",
     "fastembed>=0.8.0",
     "fastmcp>=3.4.2",
-    "html2text>=2025.4.15",
     "httpx>=0.28.1",
     "instructor>=1.15.4",
     "litellm>=1.92.0",
     "orjson>=3.11.9",
-    "playwright>=1.60.0",
     "python-dotenv>=1.0.0",
-    "rapidfuzz>=3.14.5",
     "sqlalchemy[asyncio]>=2.0.0",
     "tenacity>=9.1.4",
-    "trafilatura>=2.1.0",
 ]
 
 [project.urls]
