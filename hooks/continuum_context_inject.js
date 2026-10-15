@@ -21,7 +21,6 @@ const { spawn } = require("child_process");
 const STATE_DIR = path.join(os.homedir(), ".continuum");
 const TOKEN_FILE = path.join(STATE_DIR, "hook-token");
 const DISABLE_FILE = path.join(STATE_DIR, "hook-disabled");
-const WORKSPACE_MAP = path.join(STATE_DIR, "workspace-map.json");
 const UPDATE_STAMP = path.join(STATE_DIR, "update-checked-at");
 const UPDATE_DISABLE_FILE = path.join(STATE_DIR, "no-auto-update");
 const UPDATER = path.join(os.homedir(), ".claude", "hooks", "continuum-self-update.js");
@@ -91,13 +90,64 @@ function recentTurns(transcriptPath) {
   return turns.slice(-RECENT_TURNS).join("\n").slice(-RECENT_TOTAL_CHARS);
 }
 
-function workspaceFor(cwd) {
-  if (!cwd) return "";
+function readGitFile(file) {
   try {
-    return JSON.parse(fs.readFileSync(WORKSPACE_MAP, "utf-8"))[cwd] || "";
+    return fs.readFileSync(file, "utf-8");
   } catch {
     return "";
   }
+}
+
+function remoteUrl(config) {
+  const remotes = {};
+  let current = null;
+  for (const raw of config.split(/\r?\n/)) {
+    const line = raw.trim();
+    const section = line.match(/^\[remote\s+"([^"]+)"\]$/);
+    if (section) {
+      current = section[1];
+      continue;
+    }
+    if (line.startsWith("[")) {
+      current = null;
+      continue;
+    }
+    const url = current && line.match(/^url\s*=\s*(.+)$/);
+    if (url && !remotes[current]) remotes[current] = url[1].trim();
+  }
+  return remotes.origin || Object.values(remotes)[0] || "";
+}
+
+function repoInfo(cwd) {
+  if (!cwd) return null;
+  for (let dir = path.resolve(cwd); ; dir = path.dirname(dir)) {
+    const dotGit = path.join(dir, ".git");
+    let gitDir = null;
+    try {
+      if (fs.statSync(dotGit).isDirectory()) {
+        gitDir = dotGit;
+      } else {
+        const pointer = readGitFile(dotGit).match(/^gitdir:\s*(.+)$/m);
+        if (pointer) gitDir = path.resolve(dir, pointer[1].trim());
+      }
+    } catch {}
+    if (gitDir) {
+      const common = readGitFile(path.join(gitDir, "commondir")).trim();
+      const configDir = common ? path.resolve(gitDir, common) : gitDir;
+      return { root: dir, remote: remoteUrl(readGitFile(path.join(configDir, "config"))) };
+    }
+    if (path.dirname(dir) === dir) return null;
+  }
+}
+
+function projectFields(cwd) {
+  const forced = (process.env.CONTINUUM_PROJECT || "").trim();
+  if (forced) return { project: forced === "-" ? "" : forced };
+  const repo = repoInfo(cwd);
+  if (!repo) return {};
+  const fields = { repo_root: repo.root };
+  if (repo.remote) fields.git_remote = repo.remote;
+  return fields;
 }
 
 const REFRESH_MARGIN_MS = 2 * 60 * 1000;
@@ -239,8 +289,7 @@ async function main() {
   const event = data.hook_event_name === "SessionStart" ? "SessionStart" : "UserPromptSubmit";
   const payload = {};
   if (data.session_id) payload.session_id = data.session_id;
-  const workspace = workspaceFor(data.cwd || "");
-  if (workspace) payload.workspace = workspace;
+  Object.assign(payload, projectFields(data.cwd || ""));
 
   if (event === "SessionStart") {
     payload.event = "session_start";
