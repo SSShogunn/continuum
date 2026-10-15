@@ -18,29 +18,11 @@ const TOOL_GROUPS: { category: string; tools: { name: string; desc: string }[] }
   {
     category: "Memory",
     tools: [
-      { name: "memory_save", desc: "Save or update a persistent memory entry" },
-      { name: "memory_search", desc: "Semantic search over saved memories" },
-      { name: "memory_fact_search", desc: "Search individual extracted facts" },
-      { name: "memory_graph_search", desc: "Find memories connected to a named entity" },
+      { name: "memory_save", desc: "Save, update, append to or re-tier a memory entry" },
+      { name: "memory_search", desc: "Semantic search over memories and extracted facts" },
       { name: "memory_list", desc: "List saved memory entries" },
       { name: "memory_delete", desc: "Delete a memory entry" },
-    ],
-  },
-  {
-    category: "Browser & Web",
-    tools: [
-      { name: "fetch_page", desc: "Fetch a JS-rendered page as markdown" },
-      { name: "fetch_pages", desc: "Batch fetch multiple pages" },
-      { name: "screenshot_page", desc: "Screenshot a URL" },
-      { name: "fetch_image", desc: "Download an image" },
-      { name: "search_web", desc: "Search the web (self-hosted, no paid API)" },
-    ],
-  },
-  {
-    category: "Verification",
-    tools: [
-      { name: "check_url", desc: "Confirm a URL actually resolves" },
-      { name: "verify_quote", desc: "Check a quote appears verbatim on a page" },
+      { name: "memory_list_workspaces", desc: "List your project workspaces" },
     ],
   },
 ];
