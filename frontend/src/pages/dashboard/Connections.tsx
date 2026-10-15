@@ -93,6 +93,7 @@ interface ManualToken {
   createdAt: string;
   revokedAt: string | null;
   lastUsedAt: string | null;
+  kind: "device" | "manual";
 }
 
 function clientLabel(conn: Connection) {
@@ -108,6 +109,8 @@ export default function ConnectionsPage() {
   const [error, setError] = useState<string | null>(null);
   const [pendingDisconnect, setPendingDisconnect] = useState<Connection | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [pendingRevoke, setPendingRevoke] = useState<ManualToken | null>(null);
+  const [revoking, setRevoking] = useState(false);
 
   const [hookEnabled, setHookEnabled] = useState<boolean | null>(null);
   const [hookToggling, setHookToggling] = useState(false);
@@ -169,13 +172,11 @@ export default function ConnectionsPage() {
     try {
       const data = await api.post<{ token: string; id: string; label: string; createdAt: string }>(
         "/api/tokens",
-        { label: "default" }
+        { label: `Token · ${new Date().toLocaleDateString()}` }
       );
       setNewToken(data.token);
       setManualTokens((prev) =>
-        ([{ id: data.id, label: data.label, createdAt: data.createdAt, revokedAt: null, lastUsedAt: null }] as ManualToken[]).concat(
-          prev.map((t) => ({ ...t, revokedAt: t.revokedAt ?? new Date().toISOString() }))
-        )
+        ([{ id: data.id, label: data.label, createdAt: data.createdAt, revokedAt: null, lastUsedAt: null, kind: "manual" }] as ManualToken[]).concat(prev)
       );
       refreshOnboarding();
     } catch (e) {
@@ -185,20 +186,38 @@ export default function ConnectionsPage() {
     }
   }
 
-  function installCommand(os: InstallPlatform, token: string) {
+  function installCommand(os: InstallPlatform, token: string | null) {
+    if (!token) {
+      return os === "windows"
+        ? `irm ${MCP_URL}/install_hook.js | node -`
+        : `curl -fsSL ${MCP_URL}/install_hook.js | node`;
+    }
     return os === "windows"
       ? `$env:CONTINUUM_TOKEN="${token}"; irm ${MCP_URL}/install_hook.js | node -`
       : `curl -fsSL ${MCP_URL}/install_hook.js | CONTINUUM_TOKEN=${token} node`;
   }
 
   async function copyInstallCommand() {
-    if (!newToken) return;
     await navigator.clipboard.writeText(installCommand(installPlatform, newToken));
     setInstallCopied(true);
     setTimeout(() => setInstallCopied(false), 2000);
   }
 
-  const activeManualToken = manualTokens.find((t) => !t.revokedAt);
+  async function confirmRevoke() {
+    if (!pendingRevoke) return;
+    setRevoking(true);
+    try {
+      await api.delete(`/api/tokens/${pendingRevoke.id}`);
+      const revokedAt = new Date().toISOString();
+      setManualTokens((prev) => prev.map((t) => (t.id === pendingRevoke.id ? { ...t, revokedAt } : t)));
+      setPendingRevoke(null);
+      refreshOnboarding();
+    } finally {
+      setRevoking(false);
+    }
+  }
+
+  const devices = manualTokens.filter((t) => !t.revokedAt);
 
   return (
     <>
@@ -234,40 +253,41 @@ export default function ConnectionsPage() {
                 <CollapsibleContent>
                   <div className="space-y-3 pt-3">
                     <Separator />
-                    {newToken ? (
-                      <Tabs
-                        value={installPlatform}
-                        onValueChange={(value) => {
-                          setInstallPlatform(value as InstallPlatform);
-                          setInstallCopied(false);
-                        }}
-                        className="space-y-3"
-                      >
-                        <TabsList>
-                          <TabsTrigger value="unix">macOS / Linux</TabsTrigger>
-                          <TabsTrigger value="windows">Windows</TabsTrigger>
-                        </TabsList>
-                        {(["unix", "windows"] as const).map((os) => (
-                          <TabsContent key={os} value={os} className="space-y-3">
-                            <code className="block text-xs break-all rounded border border-border bg-muted/40 p-3 font-mono">
-                              {installCommand(os, maskSecret(newToken))}
-                            </code>
-                            <Button onClick={copyInstallCommand} variant="outline" size="sm">
-                              {installCopied ? "Copied!" : "Copy command"}
-                            </Button>
-                          </TabsContent>
-                        ))}
-                        <p className="text-muted-foreground text-xs">
-                          {installPlatform === "windows"
-                            ? "Run it in PowerShell. Requires Node 18 or newer."
-                            : "Run it in a terminal. Requires Node 18 or newer."}{" "}
-                          Use the copy button — your token is hidden above.
-                        </p>
-                      </Tabs>
-                    ) : (
+                    <Tabs
+                      value={installPlatform}
+                      onValueChange={(value) => {
+                        setInstallPlatform(value as InstallPlatform);
+                        setInstallCopied(false);
+                      }}
+                      className="space-y-3"
+                    >
+                      <TabsList>
+                        <TabsTrigger value="unix">macOS / Linux</TabsTrigger>
+                        <TabsTrigger value="windows">Windows</TabsTrigger>
+                      </TabsList>
+                      {(["unix", "windows"] as const).map((os) => (
+                        <TabsContent key={os} value={os} className="space-y-3">
+                          <code className="block text-xs break-all rounded border border-border bg-muted/40 p-3 font-mono">
+                            {installCommand(os, newToken && maskSecret(newToken))}
+                          </code>
+                          <Button onClick={copyInstallCommand} variant="outline" size="sm">
+                            {installCopied ? "Copied!" : "Copy command"}
+                          </Button>
+                        </TabsContent>
+                      ))}
+                      <p className="text-muted-foreground text-xs">
+                        {installPlatform === "windows"
+                          ? "Run it in PowerShell. Requires Node 18 or newer."
+                          : "Run it in a terminal. Requires Node 18 or newer."}{" "}
+                        {newToken
+                          ? "Use the copy button — your token is hidden above."
+                          : "It shows a code to approve in your browser — no token to paste."}
+                      </p>
+                    </Tabs>
+                    {!newToken && (
                       <div className="space-y-2">
-                        <Button onClick={mintToken} disabled={minting} variant="outline" size="sm">
-                          {minting ? "Generating…" : "Generate a token to get the install command"}
+                        <Button onClick={mintToken} disabled={minting} variant="ghost" size="sm" className="px-0 text-muted-foreground">
+                          {minting ? "Generating…" : "No browser on that machine? Use a token instead"}
                         </Button>
                         {mintError && (
                           <p className="text-destructive text-xs font-mono">{mintError}</p>
@@ -318,25 +338,30 @@ export default function ConnectionsPage() {
           )}
         </Section>
 
-        {!loading && !error && manualTokens.length > 0 && (
-          <Section title="Manual tokens">
-            <p className="text-muted-foreground text-sm mb-3">
-              Tokens generated directly from the dashboard, not tied to an OAuth client.
-            </p>
-            <Card>
-              <CardContent>
-                {activeManualToken ? (
-                  <p className="text-sm text-muted-foreground">
-                    Active token: <span className="text-foreground">{activeManualToken.label}</span>{" "}
-                    — created {new Date(activeManualToken.createdAt).toLocaleDateString()}
-                  </p>
-                ) : (
-                  <p className="text-sm text-muted-foreground">No active manual token.</p>
-                )}
-              </CardContent>
-            </Card>
+        {!loading && !error && devices.length > 0 && (
+          <Section title="Signed-in devices">
+            <div className="space-y-2">
+              {devices.map((device) => (
+                <Card key={device.id}>
+                  <CardContent className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium text-sm">{device.label}</p>
+                      <p className="text-muted-foreground text-xs mt-1">
+                        {device.kind === "device" ? "Signed in" : "Created"}{" "}
+                        {new Date(device.createdAt).toLocaleDateString()} · Last used{" "}
+                        {device.lastUsedAt ? new Date(device.lastUsedAt).toLocaleString() : "never"}
+                      </p>
+                    </div>
+                    <Button variant="destructive" size="sm" onClick={() => setPendingRevoke(device)}>
+                      {device.kind === "device" ? "Sign out" : "Revoke"}
+                    </Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
           </Section>
         )}
+
         </div>
       </Page>
 
@@ -354,6 +379,24 @@ export default function ConnectionsPage() {
             <Button variant="outline" onClick={() => setPendingDisconnect(null)}>Cancel</Button>
             <Button variant="destructive" onClick={confirmDisconnect} disabled={disconnecting}>
               {disconnecting ? "Disconnecting…" : "Disconnect"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={pendingRevoke !== null} onOpenChange={(open) => !open && setPendingRevoke(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Sign out device?</DialogTitle>
+            <DialogDescription>
+              Sign out &quot;{pendingRevoke?.label}&quot;? Its hooks stop working within an hour. Run
+              the installer on that machine again to sign it back in.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingRevoke(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={confirmRevoke} disabled={revoking}>
+              {revoking ? "Signing out…" : "Sign out"}
             </Button>
           </DialogFooter>
         </DialogContent>

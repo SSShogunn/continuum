@@ -7,6 +7,7 @@ import SignIn from "@/pages/SignIn";
 import SignUp from "@/pages/SignUp";
 import SsoCallback from "@/pages/SsoCallback";
 import OAuthConnect from "@/pages/OAuthConnect";
+import Device from "@/pages/Device";
 import DashboardLayout from "@/layouts/DashboardLayout";
 import Dashboard from "@/pages/dashboard/Dashboard";
 import Activity from "@/pages/dashboard/Activity";
@@ -54,6 +55,7 @@ export default function App() {
         <Route path="/sign-up" element={<SignUp />} />
         <Route path="/sso-callback" element={<SsoCallback />} />
         <Route path="/oauth-connect" element={<OAuthConnect />} />
+        <Route path="/device" element={<Device />} />
         <Route element={<RequireAuth />}>
           <Route path="/dashboard" element={<DashboardLayout />}>
             <Route index element={<DashboardIndex />} />
