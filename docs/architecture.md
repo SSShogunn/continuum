@@ -22,9 +22,9 @@ Saving a memory does more than store a blob:
    edge is compared with existing live edges between the same entities (or semantically close
    ones). An LLM marks it as a duplicate (skipped) or as contradicting older edges, which get
    `invalid_at` / `expired_at` set instead of being deleted — a lightweight temporal history.
-5. Facts are searchable via `memory_fact_search` (hybrid semantic + full-text, only live edges)
-   and per entity via `memory_graph_search`. Both are more precise than whole-blob search, since a
-   query only has to match one claim.
+5. Facts are returned by `memory_search` alongside matching memories (hybrid semantic +
+   full-text, only live edges). They are more precise than whole-blob search, since a query only
+   has to match one claim.
 6. Deleting a memory cascades to the edges it produced (FK on `entity_edge.episode_name`).
 
 Embeddings are computed locally in `core-mcp` with `fastembed` (`BAAI/bge-small-en-v1.5`, 384
@@ -58,7 +58,7 @@ blob meant to be dropped straight into the host's context.
 Retrieval details:
 
 - **Embedded once.** The query is embedded a single time and reused for the gate and for every
-  owner's memory and fact search (the MCP `memory_search`/`memory_fact_search` tools do the same
+  owner's memory and fact search (the MCP `memory_search` tool does the same
   across workspaces).
 - **Gate.** A workspace is searched only if its best memory or fact clears
   `CONTINUUM_HOOK_RELEVANCE_GATE` (default 0.72). bge-small scores even unrelated text around

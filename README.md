@@ -8,8 +8,6 @@ sessions instead of starting from zero every time.
 
 [![Continuum demo](frontend/src/assets/continuum-demo.gif)](frontend/src/assets/continuum-demo.mp4)
 
-<sub>Click the GIF for the full 89-second video with sound.</sub>
-
 ## Quick start
 
 Use the hosted instance — no setup required:
@@ -41,13 +39,13 @@ Prefer to run your own instance? See [Self-hosting](#self-hosting).
 
 ## What it does
 
-- **Persistent memory** — save, search, list, append, archive and delete entries, scoped per
+- **Persistent memory** — save, search, list, append and delete entries, scoped per
   user and per project **workspace** (every workspace is searched together with `default`).
 - **Recall tiers** — `always` (standing rules, injected every message), `relevance` (surfaced on
   semantic match), `manual` (explicit lookup only).
 - **Knowledge graph** — every saved memory is extracted in the background into entities and
-  relationships. Each relationship is a one-sentence fact with its own embedding, searchable via
-  `memory_fact_search` and `memory_graph_search`. Facts that a newer memory contradicts are
+  relationships. Each relationship is a one-sentence fact with its own embedding, returned
+  alongside matching memories by `memory_search`. Facts that a newer memory contradicts are
   marked no-longer-true rather than deleted.
 - **Auto-injected context** — an optional Claude Code hook injects relevant memory into every
   prompt without the model deciding to call a tool, and never repeats what the session has
@@ -55,8 +53,6 @@ Prefer to run your own instance? See [Self-hosting](#self-hosting).
 - **Session capture** — the same hook install captures durable facts from your sessions (before
   compaction and at session end) and saves them directly, merging into existing entries instead
   of duplicating them.
-- **Web tools** — `fetch_page`, `screenshot_page`, `search_web` (self-hosted SearXNG, no paid
-  API), `check_url`, `verify_quote`, `extract_structured`.
 - **OAuth 2.0** — PKCE flow with dynamic client registration, verified working with Claude.ai.
 
 Full breakdown of how the memory pipeline and hooks work: [docs/architecture.md](docs/architecture.md).
@@ -65,21 +61,13 @@ Full breakdown of how the memory pipeline and hooks work: [docs/architecture.md]
 
 | Tool | Description |
 |---|---|
-| `fetch_page` / `fetch_pages` | Render page(s) via headless Chromium (Firefox fallback), return markdown. |
-| `screenshot_page` | PNG screenshot of a page. |
-| `fetch_image` | Download an image with a desktop User-Agent + optional Referer. |
-| `search_web` | Web search via a self-hosted SearXNG instance. |
-| `check_url` | Verify a URL actually resolves. |
-| `verify_quote` | Check whether a quoted string appears verbatim on a page, fuzzy-matching the closest passage if not. |
-| `extract_structured` | Fetch a page and extract JSON matching a schema or a plain-language field list (LLM). |
-| `memory_save` / `memory_search` / `memory_list` / `memory_delete` | Persistent memory CRUD. |
-| `memory_append` | Add a line to an existing memory without resending its whole body. |
-| `memory_set_recall` | Move a memory between recall tiers (`always` / `relevance` / `manual`). |
-| `memory_archive` / `memory_restore` | Hide an entry from search and listing without deleting it, and undo that. |
-| `memory_fact_search` | Hybrid (semantic + full-text) search over knowledge-graph facts. |
-| `memory_graph_search` | Everything currently known about one entity: type, summary, live relationships. |
+| `memory_save` | Save or overwrite an entry; pass only `append` to add a line, or only `recall` to move it between tiers (`always` / `relevance` / `manual`). |
+| `memory_search` | Semantic search over memories, plus matching knowledge-graph facts. |
+| `memory_list` / `memory_delete` | List entries, delete one. |
 | `memory_list_workspaces` | List the account's workspaces. |
-| `memory_export` / `memory_import` | Portable JSON export of a workspace, and import into one. |
+
+Web search, page fetching and screenshots are left to the client's built-in tools. Export,
+import and archiving live in the dashboard.
 
 ## Self-hosting
 
@@ -115,16 +103,15 @@ cp frontend/.env.example frontend/.env
 ```
 Fill in the Clerk keys and generated secrets/keypair above — each file's comments say what's
 required vs optional. You'll also need an LLM API key for `CONTINUUM_FACT_EXTRACTION_API_KEY`
-(fact extraction) and `CONTINUUM_EXTRACT_API_KEY` (structured extraction) — any
-[litellm-supported provider](https://docs.litellm.ai/docs/providers) works, and they don't need
-to be the same one.
+(fact extraction) — any [litellm-supported provider](https://docs.litellm.ai/docs/providers)
+works.
 
 **4. Run it:**
 ```bash
 docker compose up -d --build
 ```
 This starts `frontend` (:3000, or `FRONTEND_PORT` from the root `.env`), `backend` (:8789),
-`core-mcp` (:8788), plus `worker`, `postgres`, `redis`, and `searxng` — all reachable on
+`core-mcp` (:8788), plus `worker`, `postgres` and `redis` — all reachable on
 localhost, no extra setup. `postgres` also publishes to `127.0.0.1:5432` for a host-local client.
 Schema migrations (`alembic upgrade head`) run automatically on boot.
 
@@ -146,7 +133,7 @@ First run: visit the frontend and sign up — that's your account — then conne
 ### Running a service outside Docker
 
 ```bash
-cd core-mcp && uv sync && uv run playwright install chromium firefox
+cd core-mcp && uv sync
 uv run alembic upgrade head
 uv run python -m app.server
 
@@ -193,8 +180,7 @@ docker-compose.yml    # all services — secrets come from the .env files, see .
 Each service has an `.env.example` with inline comments for every variable. Notably:
 
 - `core-mcp`: `CONTINUUM_DATABASE_URL`, `CONTINUUM_JWT_PUBLIC_KEY`,
-  `CONTINUUM_FACT_EXTRACTION_MODEL` / `_API_KEY` (litellm model string), `CONTINUUM_SEARXNG_URL`
-  (optional — defaults to the self-hosted `searxng` service).
+  `CONTINUUM_FACT_EXTRACTION_MODEL` / `_API_KEY` (litellm model string).
 - `backend`: `DATABASE_URL`, Clerk keys, `CONTINUUM_BACKEND_JWT_PRIVATE_KEY` (paired with
   core-mcp's public key).
 - `frontend`: `VITE_CLERK_PUBLISHABLE_KEY`, `VITE_BACKEND_URL` (called cross-origin with CORS),
