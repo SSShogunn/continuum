@@ -15,13 +15,47 @@ let server;
 let url;
 const requests = [];
 let contextReply = { context: "CTX" };
+const auth = { pendingPolls: 1, deviceOutcome: "approve", refreshReply: null };
+
+function parseBody(req, body) {
+  if (!body) return null;
+  if ((req.headers["content-type"] || "").includes("x-www-form-urlencoded")) {
+    return Object.fromEntries(new URLSearchParams(body));
+  }
+  return JSON.parse(body);
+}
+
+function tokenReply(form) {
+  if (form.grant_type === "refresh_token") {
+    return auth.refreshReply || [200, { access_token: `acc-${form.refresh_token}`, refresh_token: `${form.refresh_token}+`, expires_in: 3600 }];
+  }
+  if (auth.pendingPolls > 0) {
+    auth.pendingPolls -= 1;
+    return [400, { error: "authorization_pending" }];
+  }
+  if (auth.deviceOutcome === "deny") return [400, { error: "access_denied" }];
+  return [200, { access_token: "acc-0", refresh_token: "ref-0", expires_in: 3600 }];
+}
 
 before(async () => {
   server = http.createServer((req, res) => {
     let body = "";
     req.on("data", (c) => (body += c));
     req.on("end", () => {
-      requests.push({ path: req.url, body: body ? JSON.parse(body) : null });
+      const parsed = parseBody(req, body);
+      requests.push({ path: req.url, body: parsed, authorization: req.headers.authorization });
+      if (req.url === "/.well-known/oauth-authorization-server") {
+        return res.end(JSON.stringify({ device_authorization_endpoint: `${url}/oauth/device_authorization`, token_endpoint: `${url}/oauth/token`, revocation_endpoint: `${url}/oauth/revoke` }));
+      }
+      if (req.url === "/oauth/revoke") return res.end("");
+      if (req.url === "/oauth/device_authorization") {
+        return res.end(JSON.stringify({ device_code: "dev", user_code: "BCDF-GHJK", verification_uri: `${url}/device`, expires_in: 60, interval: 0 }));
+      }
+      if (req.url === "/oauth/token") {
+        const [status, reply] = tokenReply(parsed);
+        res.statusCode = status;
+        return res.end(JSON.stringify(reply));
+      }
       if (req.url === "/hook/context") return res.end(JSON.stringify(contextReply));
       if (req.url === "/hook/session") return res.end(JSON.stringify({ queued: true }));
       const file = path.join(HOOKS, req.url.slice(1));
@@ -47,7 +81,7 @@ function run(script, homeDir, input, extraEnv = {}) {
   // async spawn: the fake server runs on this process's event loop
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [path.join(HOOKS, script)], {
-      env: { ...process.env, HOME: homeDir, USERPROFILE: homeDir, CONTINUUM_MCP_URL: url, ...extraEnv },
+      env: { ...process.env, HOME: homeDir, USERPROFILE: homeDir, CONTINUUM_MCP_URL: url, CONTINUUM_NO_BROWSER: "1", ...extraEnv },
     });
     let out = "";
     child.stdout.on("data", (c) => (out += c));
@@ -163,4 +197,111 @@ test("installer registers all four events and uninstaller removes them", async (
 
   await run("uninstall_hook.js", h, "");
   assert.deepStrictEqual(JSON.parse(fs.readFileSync(settingsPath, "utf-8")).hooks, {});
+});
+
+const tokenFile = (h) => path.join(h, ".continuum", "hook-token");
+const readCreds = (h) => JSON.parse(fs.readFileSync(tokenFile(h), "utf-8"));
+const prompt = { hook_event_name: "UserPromptSubmit", session_id: "s1", prompt: "hi", cwd: "/x" };
+
+test("installer signs in with a device login and reuses the session on re-run", async () => {
+  requests.length = 0;
+  Object.assign(auth, { pendingPolls: 1, deviceOutcome: "approve", refreshReply: null });
+  const h = home();
+  fs.rmSync(tokenFile(h));
+  const inst = await run("install_hook.js", h, "", { CONTINUUM_TOKEN: "" });
+  assert.strictEqual(inst.code, 0);
+  const creds = readCreds(h);
+  assert.strictEqual(creds.access_token, "acc-0");
+  assert.strictEqual(creds.refresh_token, "ref-0");
+  assert.strictEqual(creds.token_endpoint, `${url}/oauth/token`);
+  assert.ok(requests.some((r) => r.path === "/oauth/device_authorization" && r.body.device_name));
+
+  requests.length = 0;
+  await run("install_hook.js", h, "", { CONTINUUM_TOKEN: "" });
+  assert.ok(!requests.some((r) => r.path === "/oauth/device_authorization"));
+  assert.strictEqual(readCreds(h).refresh_token, "ref-0+");
+});
+
+test("installer fails when the login is denied", async () => {
+  Object.assign(auth, { pendingPolls: 0, deviceOutcome: "deny", refreshReply: null });
+  const h = home();
+  fs.rmSync(tokenFile(h));
+  const inst = await run("install_hook.js", h, "", { CONTINUUM_TOKEN: "" });
+  assert.strictEqual(inst.code, 1);
+  assert.ok(!fs.existsSync(tokenFile(h)));
+});
+
+test("hooks refresh an expiring access token and send the new one", async () => {
+  requests.length = 0;
+  Object.assign(auth, { refreshReply: null });
+  const h = home();
+  fs.writeFileSync(tokenFile(h), JSON.stringify({ access_token: "old", refresh_token: "r1", expires_at: Date.now() + 1000, token_endpoint: `${url}/oauth/token` }));
+  const { out } = await run("continuum_context_inject.js", h, prompt);
+  assert.strictEqual(JSON.parse(out).hookSpecificOutput.additionalContext, "CTX");
+  assert.strictEqual(requests.find((r) => r.path === "/hook/context").authorization, "Bearer acc-r1");
+  const creds = readCreds(h);
+  assert.strictEqual(creds.refresh_token, "r1+");
+  assert.ok(creds.expires_at > Date.now() + 3000 * 1000);
+  assert.ok(!fs.existsSync(tokenFile(h) + ".lock"));
+
+  requests.length = 0;
+  await run("continuum_context_inject.js", h, prompt);
+  assert.ok(!requests.some((r) => r.path === "/oauth/token"));
+});
+
+test("a revoked session stops the hooks until the installer runs again", async () => {
+  requests.length = 0;
+  Object.assign(auth, { refreshReply: [400, { error: "invalid_grant" }] });
+  const h = home();
+  fs.writeFileSync(tokenFile(h), JSON.stringify({ access_token: "old", refresh_token: "r1", expires_at: Date.now() - 1000, token_endpoint: `${url}/oauth/token` }));
+  const { code, out } = await run("continuum_context_inject.js", h, prompt);
+  assert.strictEqual(code, 0);
+  assert.strictEqual(out, "");
+  assert.strictEqual(readCreds(h).invalid, true);
+  requests.length = 0;
+  await run("continuum_session_capture.js", h, { hook_event_name: "SessionEnd", session_id: "s9", transcript_path: transcript(h, [say("user", "x".repeat(800))]) });
+  assert.strictEqual(requests.length, 0);
+  auth.refreshReply = null;
+});
+
+test("a hook skips refreshing while another holds the lock", async () => {
+  requests.length = 0;
+  const h = home();
+  fs.writeFileSync(tokenFile(h), JSON.stringify({ access_token: "still-valid", refresh_token: "r1", expires_at: Date.now() + 30 * 1000, token_endpoint: `${url}/oauth/token` }));
+  fs.writeFileSync(tokenFile(h) + ".lock", "");
+  await run("continuum_context_inject.js", h, prompt);
+  assert.ok(!requests.some((r) => r.path === "/oauth/token"));
+  assert.strictEqual(requests.find((r) => r.path === "/hook/context").authorization, "Bearer still-valid");
+});
+
+test("both hooks carry the same token refresh code", () => {
+  const block = (name) => {
+    const src = fs.readFileSync(path.join(HOOKS, name), "utf-8");
+    const start = src.indexOf("const REFRESH_MARGIN_MS");
+    const end = src.indexOf("\n}\n", src.indexOf("async function accessToken"));
+    return src.slice(start, end);
+  };
+  const inject = block("continuum_context_inject.js");
+  assert.ok(inject.length > 500);
+  assert.strictEqual(block("continuum_session_capture.js"), inject);
+});
+
+test("uninstaller revokes the device session before deleting it", async () => {
+  requests.length = 0;
+  const h = home();
+  fs.writeFileSync(tokenFile(h), JSON.stringify({ access_token: "acc", refresh_token: "ref", expires_at: Date.now() + 3600 * 1000, token_endpoint: `${url}/oauth/token` }));
+  const { code, out } = await run("uninstall_hook.js", h, "");
+  assert.strictEqual(code, 0);
+  const revoked = requests.filter((r) => r.path === "/oauth/revoke").map((r) => r.body.token);
+  assert.deepStrictEqual(revoked, ["ref", "acc"]);
+  assert.match(out, /signed out on the server/);
+  assert.ok(!fs.existsSync(path.join(h, ".continuum")));
+});
+
+test("uninstaller still cleans up when the server is unreachable", async () => {
+  const h = home();
+  const { code, out } = await run("uninstall_hook.js", h, "", { CONTINUUM_MCP_URL: "http://127.0.0.1:1" });
+  assert.strictEqual(code, 0);
+  assert.match(out, /Couldn't reach Continuum/);
+  assert.ok(!fs.existsSync(path.join(h, ".continuum")));
 });
