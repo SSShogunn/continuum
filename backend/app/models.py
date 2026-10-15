@@ -54,6 +54,10 @@ class McpToken(Base):
     )
     revokedAt: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     lastUsedAt: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    refreshTokenHash: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True)
+    prevRefreshTokenHash: Mapped[str | None] = mapped_column(Text, nullable=True)
+    refreshRotatedAt: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    refreshExpiresAt: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
 
     __table_args__ = (
         Index("McpToken_clerkUserId_idx", "clerkUserId"),
@@ -83,6 +87,22 @@ class OAuthCode(Base):
     codeChallenge: Mapped[str | None] = mapped_column(Text, nullable=True)
     codeChallengeMethod: Mapped[str | None] = mapped_column(Text, nullable=True)
     expiresAt: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
+    createdAt: Mapped[datetime] = mapped_column(
+        UTCDateTime, nullable=False, server_default=func.current_timestamp()
+    )
+
+
+class DeviceAuthorization(Base):
+    __tablename__ = "DeviceAuthorization"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=_uuid)
+    deviceCodeHash: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    userCode: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    deviceName: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
+    clerkUserId: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expiresAt: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
+    lastPolledAt: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     createdAt: Mapped[datetime] = mapped_column(
         UTCDateTime, nullable=False, server_default=func.current_timestamp()
     )

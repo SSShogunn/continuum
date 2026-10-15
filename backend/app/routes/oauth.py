@@ -3,7 +3,6 @@ import hashlib
 import re
 import secrets
 import urllib.parse
-import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Form, HTTPException
@@ -15,8 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.db import get_session
 from app.deps import get_current_user
-from app.jwt import mint_mcp_token
 from app.models import McpToken, OAuthClient, OAuthCode
+from app.routes.device import DEVICE_GRANT, device_code_grant, issue_session, refresh_token_grant
 
 router = APIRouter(tags=["oauth"])
 
@@ -41,7 +40,9 @@ async def oauth_metadata():
         "token_endpoint": f"{base}/oauth/token",
         "registration_endpoint": f"{base}/oauth/register",
         "response_types_supported": ["code"],
-        "grant_types_supported": ["authorization_code"],
+        "device_authorization_endpoint": f"{base}/oauth/device_authorization",
+        "revocation_endpoint": f"{base}/oauth/revoke",
+        "grant_types_supported": ["authorization_code", DEVICE_GRANT, "refresh_token"],
         "code_challenge_methods_supported": ["S256"],
         "token_endpoint_auth_methods_supported": ["none"],
         "scopes_supported": ["mcp"],
@@ -71,7 +72,7 @@ async def register_client(
             "client_id": client.id,
             "client_secret": client_secret,
             "redirect_uris": body.redirect_uris,
-            "grant_types": ["authorization_code"],
+            "grant_types": ["authorization_code", "refresh_token"],
             "response_types": ["code"],
             "token_endpoint_auth_method": "none",
         },
@@ -152,14 +153,22 @@ async def authorize_complete(
 @router.post("/oauth/token")
 async def token_exchange(
     grant_type: str = Form(),
-    code: str = Form(),
-    redirect_uri: str = Form(),
-    client_id: str = Form(),
+    code: str | None = Form(default=None),
+    redirect_uri: str | None = Form(default=None),
+    client_id: str | None = Form(default=None),
     code_verifier: str | None = Form(default=None),
+    device_code: str | None = Form(default=None),
+    refresh_token: str | None = Form(default=None),
     session: AsyncSession = Depends(get_session),
 ):
+    if grant_type == DEVICE_GRANT:
+        return await device_code_grant(session, device_code)
+    if grant_type == "refresh_token":
+        return await refresh_token_grant(session, refresh_token, client_id)
     if grant_type != "authorization_code":
         raise HTTPException(400, detail={"error": "unsupported_grant_type"})
+    if not code or not redirect_uri or not client_id:
+        raise HTTPException(400, detail={"error": "invalid_request", "error_description": "code, redirect_uri and client_id are required"})
 
     client = await session.get(OAuthClient, client_id)
     if not client:
@@ -209,19 +218,4 @@ async def token_exchange(
         .values(revokedAt=now)
     )
 
-    jti = str(uuid.uuid4())
-    access_token = mint_mcp_token(clerk_user_id, jti)
-    session.add(
-        McpToken(
-            clerkUserId=clerk_user_id,
-            label=client.name or "oauth",
-            jti=jti,
-            clientId=client_id,
-        )
-    )
-    await session.commit()
-
-    return JSONResponse(
-        content={"access_token": access_token, "token_type": "bearer"},
-        headers={"Cache-Control": "no-store"},
-    )
+    return await issue_session(session, clerk_user_id, client.name or "oauth", client_id)

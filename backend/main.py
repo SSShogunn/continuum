@@ -8,7 +8,7 @@ from app import core_client
 from app.config import settings
 from app.db import connect, disconnect
 from app.deps import get_current_user
-from app.routes import account, admin, connections, internal, memory, oauth, stats, tokens
+from app.routes import account, admin, connections, device, internal, memory, oauth, stats, tokens
 
 
 @asynccontextmanager
@@ -34,6 +34,7 @@ app.include_router(connections.router)
 app.include_router(memory.router)
 app.include_router(admin.router)
 app.include_router(oauth.router)
+app.include_router(device.router)
 app.include_router(stats.router)
 app.include_router(internal.router)
 app.include_router(account.router)

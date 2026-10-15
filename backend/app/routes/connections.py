@@ -58,6 +58,7 @@ async def list_connections(
             "createdAt": t.createdAt,
             "revokedAt": t.revokedAt,
             "lastUsedAt": t.lastUsedAt,
+            "kind": "device" if t.refreshTokenHash else "manual",
         }
         for t in manual_result.scalars()
     ]

@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
@@ -25,18 +25,6 @@ async def mint_token(
     session: AsyncSession = Depends(get_session),
 ):
     clerk_user_id = user["sub"]
-
-    # Revoke any existing active manual token for this user (OAuth-client
-    # tokens are a separate, independently-revocable set — see connections.py)
-    await session.execute(
-        update(McpToken)
-        .where(
-            McpToken.clerkUserId == clerk_user_id,
-            McpToken.clientId.is_(None),
-            McpToken.revokedAt.is_(None),
-        )
-        .values(revokedAt=datetime.now(timezone.utc))
-    )
 
     jti = str(uuid.uuid4())
     raw_jwt = mint_mcp_token(clerk_user_id, jti)

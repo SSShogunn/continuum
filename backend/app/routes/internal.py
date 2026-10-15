@@ -1,5 +1,8 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from pydantic import BaseModel, Field
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
@@ -19,3 +22,23 @@ async def revoked_jtis(session: AsyncSession = Depends(get_session)):
         select(McpToken.jti).where(McpToken.revokedAt.is_not(None))
     )
     return {"jtis": [row[0] for row in result.all()]}
+
+
+class TokenUsage(BaseModel):
+    usage: dict[str, int] = Field(max_length=5000)
+
+
+@router.post("/token-usage", dependencies=[Depends(require_internal_secret)])
+async def token_usage(body: TokenUsage, session: AsyncSession = Depends(get_session)):
+    for jti, seen in body.usage.items():
+        used_at = datetime.fromtimestamp(seen, timezone.utc)
+        await session.execute(
+            update(McpToken)
+            .where(
+                McpToken.jti == jti,
+                or_(McpToken.lastUsedAt.is_(None), McpToken.lastUsedAt < used_at),
+            )
+            .values(lastUsedAt=used_at)
+        )
+    await session.commit()
+    return {"updated": len(body.usage)}
