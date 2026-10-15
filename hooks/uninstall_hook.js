@@ -15,6 +15,9 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
+const CONTINUUM_URL = (process.env.CONTINUUM_MCP_URL || "https://continuum-mcp.sshogunn.org").replace(/\/$/, "");
+const TIMEOUT_MS = 5000;
+
 const HOME = os.homedir();
 const STATE_DIR = path.join(HOME, ".continuum");
 const HOOKS_DIR = path.join(HOME, ".claude", "hooks");
@@ -23,6 +26,53 @@ const SETTINGS_PATH = path.join(HOME, ".claude", "settings.json");
 
 const STEMS = ["continuum-context-inject", "continuum-session-capture", "continuum-self-update"];
 const EVENTS = ["UserPromptSubmit", "SessionStart", "SessionEnd", "PreCompact"];
+
+function savedTokens() {
+  let raw;
+  try {
+    raw = fs.readFileSync(path.join(STATE_DIR, "hook-token"), "utf-8").trim();
+  } catch {
+    return [];
+  }
+  if (!raw) return [];
+  if (!raw.startsWith("{")) return [raw];
+  try {
+    const creds = JSON.parse(raw);
+    return [creds.refresh_token, creds.access_token].filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+async function fetchWithTimeout(url, init) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function signOut() {
+  const tokens = savedTokens();
+  if (!tokens.length) return null;
+  try {
+    const metadata = await (await fetchWithTimeout(`${CONTINUUM_URL}/.well-known/oauth-authorization-server`)).json();
+    if (!metadata.revocation_endpoint) return false;
+    for (const token of tokens) {
+      const response = await fetchWithTimeout(metadata.revocation_endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ token }),
+      });
+      if (!response.ok) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function removeFiles() {
   for (const stem of STEMS) {
@@ -78,11 +128,16 @@ function cleanSettings() {
   return removed;
 }
 
-function main() {
+async function main() {
+  const signedOut = await signOut();
   removeFiles();
   cleanSettings();
   console.log("");
   console.log("Continuum has been removed, along with your saved token on this machine.");
+  if (signedOut === true) console.log("This device is signed out on the server too.");
+  if (signedOut === false) {
+    console.log("Couldn't reach Continuum to sign this device out — remove it under Connections in the dashboard.");
+  }
   console.log("Your memories are untouched — sign in to the dashboard anytime.");
   console.log("Restart Claude Code to finish.");
 }

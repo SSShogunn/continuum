@@ -118,6 +118,102 @@ function workspaceFor(cwd) {
   }
 }
 
+const REFRESH_MARGIN_MS = 2 * 60 * 1000;
+const REFRESH_TIMEOUT_MS = 1500;
+const LOCK_STALE_MS = 10 * 1000;
+
+function readCreds() {
+  let raw;
+  try {
+    raw = fs.readFileSync(TOKEN_FILE, "utf-8").trim();
+  } catch {
+    return null;
+  }
+  if (!raw) return null;
+  if (!raw.startsWith("{")) return { access_token: raw };
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function writeCreds(creds) {
+  const temp = `${TOKEN_FILE}.${process.pid}.tmp`;
+  fs.writeFileSync(temp, JSON.stringify(creds), { mode: 0o600 });
+  fs.renameSync(temp, TOKEN_FILE);
+}
+
+function isFresh(creds) {
+  return !creds.expires_at || creds.expires_at - Date.now() > REFRESH_MARGIN_MS;
+}
+
+function usable(creds) {
+  return creds.access_token && (!creds.expires_at || creds.expires_at > Date.now()) ? creds.access_token : null;
+}
+
+function takeLock(lock) {
+  try {
+    fs.closeSync(fs.openSync(lock, "wx"));
+    return true;
+  } catch {
+    try {
+      if (Date.now() - fs.statSync(lock).mtimeMs < LOCK_STALE_MS) return false;
+      fs.unlinkSync(lock);
+      fs.closeSync(fs.openSync(lock, "wx"));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+async function accessToken() {
+  let creds = readCreds();
+  if (!creds || creds.invalid) return null;
+  if (isFresh(creds) || !creds.refresh_token || !creds.token_endpoint) return usable(creds);
+
+  const lock = `${TOKEN_FILE}.lock`;
+  if (!takeLock(lock)) return usable(creds);
+  try {
+    creds = readCreds() || creds;
+    if (isFresh(creds)) return usable(creds);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS);
+    let response;
+    try {
+      response = await fetch(creds.token_endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: creds.refresh_token }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    const body = await response.json();
+    if (response.ok && body.access_token) {
+      creds = {
+        ...creds,
+        access_token: body.access_token,
+        refresh_token: body.refresh_token || creds.refresh_token,
+        expires_at: Date.now() + (body.expires_in || 3600) * 1000,
+      };
+      writeCreds(creds);
+    } else if (body.error === "invalid_grant") {
+      writeCreds({ ...creds, invalid: true });
+      return null;
+    }
+    return usable(creds);
+  } catch {
+    return usable(creds);
+  } finally {
+    try {
+      fs.unlinkSync(lock);
+    } catch {}
+  }
+}
+
 function readStdin() {
   return new Promise((resolve, reject) => {
     let data = "";
@@ -130,13 +226,7 @@ function readStdin() {
 
 async function main() {
   if (fs.existsSync(DISABLE_FILE) || fs.existsSync(CAPTURE_DISABLE_FILE)) return;
-  let token;
-  try {
-    token = fs.readFileSync(TOKEN_FILE, "utf-8").trim();
-  } catch {
-    return;
-  }
-  if (!token) return;
+  if (!readCreds()) return;
 
   let data;
   try {
@@ -157,6 +247,9 @@ async function main() {
   const payload = { transcript: text, session_id: sessionId };
   const workspace = workspaceFor(data.cwd || "");
   if (workspace) payload.workspace = workspace;
+
+  const token = await accessToken();
+  if (!token) return;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);

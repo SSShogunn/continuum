@@ -8,26 +8,21 @@
 // memory_search (plus SessionStart, where the same script delivers standing
 // rules once per session), and SessionEnd + PreCompact hooks that capture
 // durable facts from the transcript into memory.
-// Safe to re-run (idempotent) — re-running just refreshes the token and hook
+// Safe to re-run (idempotent) — re-running just refreshes the sign-in and hook
 // scripts, and won't duplicate the settings.json entry. Also cleans up an
 // older Python-based install if one is present, so the two don't run side by side.
 //
-//   Linux/macOS   curl -fsSL https://continuum-mcp.sshogunn.org/install_hook.js | CONTINUUM_TOKEN=<token> node
-//   Windows       $env:CONTINUUM_TOKEN="<token>"; irm https://continuum-mcp.sshogunn.org/install_hook.js | node -
+//   Linux/macOS   curl -fsSL https://continuum-mcp.sshogunn.org/install_hook.js | node
+//   Windows       irm https://continuum-mcp.sshogunn.org/install_hook.js | node -
 //
-// <token> comes from the dashboard's Connections page ("Generate token"). Node
-// 18+ is required (for built-in fetch) — that's the only dependency now that
-// there's no separate Python runtime to find.
-//
-// Piping a script straight into `node`'s stdin means stdin is spent carrying
-// the script itself, so there's no terminal left free to prompt for a missing
-// token here (unlike running this file directly, where it still works) — the
-// token must be passed inline as shown above.
+// Sign-in shows a code to approve on the dashboard's /device page; CONTINUUM_TOKEN=<token>
+// still works for headless installs. Node 18+ is required (for built-in fetch) — that's
+// the only dependency now that there's no separate Python runtime to find.
 
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const readline = require("readline");
+const { spawn } = require("child_process");
 
 const CONTINUUM_URL = (process.env.CONTINUUM_MCP_URL || "https://continuum-mcp.sshogunn.org").replace(/\/$/, "");
 
@@ -59,7 +54,7 @@ const UPDATER = ["continuum-self-update", "continuum_self_update.js"];
 // Progress reporting. The script arrives on stdin, but stderr is still the
 // terminal, so that's where the spinner goes — it keeps stdout clean for the
 // summary and stays out of the way when the install is piped somewhere.
-const TOTAL_STEPS = 4;
+const TOTAL_STEPS = 5;
 const FANCY =
   Boolean(process.stderr.isTTY) &&
   process.env.TERM !== "dumb" &&
@@ -136,31 +131,128 @@ function checkNode() {
   }
 }
 
-async function readToken() {
-  const token = (process.env.CONTINUUM_TOKEN || "").trim();
-  if (token) return token;
-  if (!process.stdin.isTTY) {
-    const retry =
-      process.platform === "win32"
-        ? `  $env:CONTINUUM_TOKEN="<token>"; irm ${CONTINUUM_URL}/install_hook.js | node -`
-        : `  curl -fsSL ${CONTINUUM_URL}/install_hook.js | CONTINUUM_TOKEN=<token> node`;
-    fail("No CONTINUUM_TOKEN provided and no terminal to prompt on. Re-run with:\n" + retry);
-  }
-  return new Promise((resolve, reject) => {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
-    rl.question("Paste your Continuum token (from the dashboard's Connections page): ", (answer) => {
-      rl.close();
-      const trimmed = answer.trim();
-      if (!trimmed) {
-        process.stderr.write("error: No token provided — aborting.\n");
-        const err = new Error("no token");
-        err.continuumHandled = true;
-        reject(err);
-        return;
-      }
-      resolve(trimmed);
-    });
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function postForm(url, fields) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": "continuum-hook-installer" },
+    body: new URLSearchParams(fields),
   });
+  let body = {};
+  try {
+    body = await response.json();
+  } catch {}
+  return { ok: response.ok, status: response.status, body };
+}
+
+function credsFrom(body, tokenEndpoint, previous = {}) {
+  return {
+    access_token: body.access_token,
+    refresh_token: body.refresh_token || previous.refresh_token,
+    expires_at: Date.now() + (body.expires_in || 3600) * 1000,
+    token_endpoint: tokenEndpoint,
+  };
+}
+
+async function reuseSession() {
+  let creds;
+  try {
+    creds = JSON.parse(fs.readFileSync(TOKEN_PATH, "utf-8"));
+  } catch {
+    return null;
+  }
+  if (!creds || creds.invalid || !creds.refresh_token || !creds.token_endpoint) return null;
+  try {
+    const { ok, body } = await postForm(creds.token_endpoint, {
+      grant_type: "refresh_token",
+      refresh_token: creds.refresh_token,
+    });
+    return ok && body.access_token ? credsFrom(body, creds.token_endpoint, creds) : null;
+  } catch {
+    return null;
+  }
+}
+
+function openBrowser(url) {
+  if (process.env.CONTINUUM_NO_BROWSER) return;
+  if (process.platform === "linux" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) return;
+  const [cmd, args] =
+    process.platform === "darwin"
+      ? ["open", [url]]
+      : process.platform === "win32"
+        ? ["cmd", ["/c", "start", "", url.replace(/&/g, "^&")]]
+        : ["xdg-open", [url]];
+  try {
+    const child = spawn(cmd, args, { detached: true, stdio: "ignore" });
+    child.on("error", () => {});
+    child.unref();
+  } catch {}
+}
+
+async function deviceLogin() {
+  let metadata;
+  try {
+    const response = await fetch(`${CONTINUUM_URL}/.well-known/oauth-authorization-server`);
+    metadata = await response.json();
+  } catch (exc) {
+    fail(`could not reach ${CONTINUUM_URL} (${exc.message || exc})`);
+  }
+  const deviceEndpoint = metadata && metadata.device_authorization_endpoint;
+  const tokenEndpoint = metadata && metadata.token_endpoint;
+  if (!deviceEndpoint || !tokenEndpoint) fail("this Continuum server doesn't support device login yet");
+
+  const start = await postForm(deviceEndpoint, { device_name: `${os.hostname()} (${process.platform})` });
+  if (!start.ok || !start.body.device_code) fail(`could not start sign-in (HTTP ${start.status})`);
+  const { device_code, user_code, verification_uri, verification_uri_complete } = start.body;
+
+  process.stderr.write(`\n      Open ${verification_uri} and confirm this code:\n\n          ${user_code}\n\n`);
+  openBrowser(verification_uri_complete || verification_uri);
+  setLabel("signing in — waiting for approval in the browser");
+
+  let interval = (start.body.interval ?? 5) * 1000;
+  const deadline = Date.now() + (start.body.expires_in || 600) * 1000;
+  while (Date.now() < deadline) {
+    await sleep(interval);
+    let poll;
+    try {
+      poll = await postForm(tokenEndpoint, {
+        grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+        device_code,
+      });
+    } catch {
+      continue;
+    }
+    if (poll.ok && poll.body.access_token) return credsFrom(poll.body, tokenEndpoint);
+    const error = poll.body.error;
+    if (error === "authorization_pending") continue;
+    if (error === "slow_down") {
+      interval += 5000;
+      continue;
+    }
+    if (error === "access_denied") fail("sign-in was denied in the dashboard");
+    if (error === "expired_token") break;
+    fail(`sign-in failed (${error || `HTTP ${poll.status}`})`);
+  }
+  fail("the code expired before it was approved — run the installer again");
+}
+
+async function signIn() {
+  startStep("signing in");
+  const token = (process.env.CONTINUUM_TOKEN || "").trim();
+  if (token) {
+    endStep("using CONTINUUM_TOKEN");
+    return token;
+  }
+  const reused = await reuseSession();
+  if (reused) {
+    endStep("already signed in");
+    return reused;
+  }
+  const creds = await deviceLogin();
+  setLabel("signing in");
+  endStep("approved");
+  return creds;
 }
 
 async function download(name) {
@@ -222,7 +314,7 @@ async function main() {
   checkNode();
   endStep(process.version);
 
-  const token = await readToken();
+  const creds = await signIn();
 
   const names = [...new Set(HOOKS.map(([, , name]) => name))].concat([UPDATER[1]]);
   startStep(`downloading (0/${names.length})`);
@@ -241,7 +333,7 @@ async function main() {
   startStep("installing");
   fs.mkdirSync(STATE_DIR, { recursive: true });
   fs.mkdirSync(HOOKS_DIR, { recursive: true });
-  writePrivate(TOKEN_PATH, token);
+  writePrivate(TOKEN_PATH, typeof creds === "string" ? creds : JSON.stringify(creds));
 
   const settings = loadSettings();
   const hooks = settings.hooks || (settings.hooks = {});
